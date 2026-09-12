@@ -1,3 +1,6 @@
-*.retry
+# 真实 inventory 含服务器地址，不进版本控制
+inventory/hosts.ini
+*.vault
+.vault_pass
 __pycache__/
-.vscode/
+*.retry
