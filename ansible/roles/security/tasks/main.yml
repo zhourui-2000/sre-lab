@@ -1,0 +1,39 @@
+---
+- name: 部署 fail2ban 配置
+  copy:
+    src: jail.local
+    dest: /etc/fail2ban/jail.local
+  notify: restart fail2ban
+
+- name: 确保 firewalld 开机并运行
+  systemd:
+    name: firewalld
+    state: started
+    enabled: true
+
+- name: 放行 SSH 端口
+  firewalld:
+    port: 2222/tcp
+    permanent: true
+    state: enabled
+  notify: reload firewalld
+
+- name: 放行 HTTP
+  firewalld:
+    service: http
+    permanent: true
+    state: enabled
+  notify: reload firewalld
+
+- name: 放行 HTTPS
+  firewalld:
+    service: https
+    permanent: true
+    state: enabled
+  notify: reload firewalld
+
+- name: 确保 fail2ban 开机并运行
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: true
