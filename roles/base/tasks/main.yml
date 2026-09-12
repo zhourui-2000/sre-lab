@@ -1,0 +1,60 @@
+---
+- name: 部署 sysctl 参数
+  copy:
+    dest: /etc/sysctl.d/99-sre-lab.conf
+    content: |
+      vm.swappiness=10
+      vm.vfs_cache_pressure=50
+  notify: reload sysctl
+
+- name: 创建 swap 文件
+  command:
+    cmd: dd if=/dev/zero of=/swapfile bs=1M count=2048
+    creates: /swapfile
+
+- name: 设置 swap 权限
+  file:
+    path: /swapfile
+    mode: '0600'
+
+- name: 查询当前已启用的 swap 设备
+  command: swapon --show=NAME --noheadings
+  register: swapon_devices
+  changed_when: false
+
+- name: 格式化并启用 swap（仅当尚未启用时）
+  command: "{{ item }}"
+  loop:
+    - mkswap /swapfile
+    - swapon /swapfile
+  when: "'/swapfile' not in swapon_devices.stdout_lines"
+
+- name: swap 开机自动挂载
+  lineinfile:
+    path: /etc/fstab
+    line: '/swapfile none swap sw 0 0'
+    state: present
+
+- name: 确保 journald 配置目录存在
+  file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: '0755'
+
+- name: 部署 journald 限额
+  copy:
+    src: journald-limit.conf
+    dest: /etc/systemd/journald.conf.d/00-limit.conf
+  notify: restart journald
+
+- name: 确保 docker 配置目录存在
+  file:
+    path: /etc/docker
+    state: directory
+    mode: '0755'
+
+- name: 部署 docker daemon 配置
+  copy:
+    src: daemon.json
+    dest: /etc/docker/daemon.json
+  notify: restart docker
