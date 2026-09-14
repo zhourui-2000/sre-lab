@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目中心 · Project Hub</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+      radial-gradient(1000px 500px at 85% 110%, rgba(14, 165, 233, 0.16), transparent 60%),
+      linear-gradient(160deg, #0b1020 0%, #0e1526 45%, #0a0f1d 100%);
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 56px 20px 40px;
+  }
+  header { text-align: center; margin-bottom: 40px; }
+  header h1 {
+    font-size: 34px;
+    letter-spacing: 2px;
+    background: linear-gradient(90deg, #a5b4fc, #67e8f9);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 800;
+  }
+  header .tag { margin-top: 10px; font-size: 14px; color: #8b9bb4; letter-spacing: 1px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 340px));
+    gap: 22px;
+    justify-content: center;
+    width: 100%;
+    max-width: 980px;
+  }
+  .card {
+    position: relative;
+    background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 16px;
+    padding: 26px 24px 22px;
+    overflow: hidden;
+    text-decoration: none;
+    color: #e2e8f0;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+    display: block;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(140deg, rgba(99,102,241,0.22), rgba(56,189,248,0.14));
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+  .card:hover { transform: translateY(-5px); box-shadow: 0 18px 44px rgba(2, 6, 23, 0.55); border-color: rgba(148,163,184,0.45); }
+  .card:hover::before { opacity: 1; }
+  .card > * { position: relative; }
+  .card .ico {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+  .card h2 { font-size: 19px; margin-bottom: 8px; color: #f1f5f9; }
+  .card p { font-size: 13.5px; color: #94a3b8; line-height: 1.7; min-height: 60px; }
+  .card .chips { margin: 12px 0 16px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 11.5px; color: #a5b4fc;
+    background: rgba(99,102,241,0.12);
+    border: 1px solid rgba(99,102,241,0.35);
+    padding: 2px 9px; border-radius: 999px;
+  }
+  .card .go {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 600; color: #e2e8f0;
+  }
+  .card .go .arrow { transition: transform 0.2s ease; }
+  .card:hover .go .arrow { transform: translateX(4px); }
+  .hint-note {
+    margin-top: 44px; max-width: 700px; text-align: center;
+    font-size: 12.5px; color: #64748b; line-height: 1.8;
+    background: rgba(148,163,184,0.06); border: 1px dashed rgba(148,163,184,0.2);
+    padding: 10px 18px; border-radius: 10px;
+  }
+  .hint-note code {
+    background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 4px;
+    font-family: "SF Mono", Consolas, monospace; color: #cbd5e1;
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>项目中心</h1>
+    <div class="tag">PROJECT HUB · 选择一个项目开始体验</div>
+  </header>
+
+  <div class="grid">
+    <!-- ===== 项目卡片：在此复制整块 <a class="card">…</a> 即可添加新项目 ===== -->
+    <a class="card" href="quiz/" target="_blank">
+      <div class="ico">📚</div>
+      <h2>Linux 基础习题库</h2>
+      <p>覆盖目录结构与命令操作两大板块的随机刷题工具：473 道单选 / 多选 / 判断 / 填空 / 配对，即时判分与解析，支持纯键盘操作。</p>
+      <div class="chips">
+        <span class="chip">473 题</span>
+        <span class="chip">5 种题型</span>
+        <span class="chip">键盘导航</span>
+      </div>
+      <span class="go">进入项目 <span class="arrow">→</span></span>
+    </a>
+
+    <a class="card" href="story/" target="_blank">
+      <div class="ico">📖</div>
+      <h2>轨迹系列故事全集 · V3</h2>
+      <p>轨迹系列逐章详述与人设图鉴 V3：全剧情时间线、章节故事与人物设定合集，图文并茂的单页典藏版。</p>
+      <div class="chips">
+        <span class="chip">逐章详述</span>
+        <span class="chip">人设图鉴</span>
+        <span class="chip">V3</span>
+      </div>
+      <span class="go">进入项目 <span class="arrow">→</span></span>
+    </a>
+
+    <a class="card" href="dtb/" target="_blank">
+      <div class="ico">&#128073;</div>
+      <h2>黑之契约者 · 全系列剧情档案</h2>
+      <p>DARKER THAN BLACK 三部曲单页典藏：第一季 26 话 + 外传《漆黑之花》4 话 + 第二季《流星之双子》12 话逐集详解，36 张人物档案卡，四首主题曲内嵌播放器。</p>
+      <div class="chips">
+        <span class="chip">42 话</span>
+        <span class="chip">3 部曲</span>
+        <span class="chip">内嵌音乐</span>
+      </div>
+    </a>
+    <!-- ================= 新项目卡片结束 ================= -->
+  </div>
+
+  <div class="hint-note">
+    💡 维护提示：新增项目时，在上方注释位置复制一张 <code>&lt;a class="card" href="xxx/"&gt;</code> 卡片，
+    并把文件放入服务器对应子目录（如 <code>xxx/index.html</code>）即可上线，无需改动其他内容。
+  </div>
+</body>
+</html>

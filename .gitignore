@@ -1,6 +1,13 @@
-# 真实 inventory 含服务器地址，不进版本控制
-inventory/hosts.ini
-*.vault
-.vault_pass
-__pycache__/
-*.retry
+nginx/logs/
+
+# 大体积静态资源：待外置优化，暂不纳入版本控制
+*.mp4
+*.mp3
+*.wav
+*.ogg
+*.m4a
+
+# 含 base64 内嵌资源的超大页面（优化后再纳入）
+nginx/html/dtb/
+nginx/html/story/
+nginx/html/quiz/
