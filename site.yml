@@ -1,6 +1,0 @@
----
-- hosts: lab
-  become: true
-  roles:
-    - base
-    - security
