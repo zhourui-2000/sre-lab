@@ -69,3 +69,11 @@ k3s 需 700–900MB。**处于边界，需实测后决策**（见 docs/capacity.
 1. **k3s 可行**：1143 - 750 = 393MB 余量，但需关闭内置 traefik/servicelb/metrics-server
 2. **配额可收紧**：所有容器实际用量远低于配额，web 仅 2.96MB
 3. **需持续观察**：当前为空载数据，VM 内存随数据量增长，一周后复测峰值再定最终配额
+
+## 故障记录：nginx http2 指令版本不兼容（2026-09-16）
+
+- 现象：容器崩溃循环，`nginx: [emerg] unknown directive "http2"`
+- 根因：`http2 on;` 为 nginx 1.25.1+ 语法，镜像实际为旧版
+- 修复：改用 `listen 443 ssl http2;`（兼容写法）
+- 根因中的根因：使用了 `nginx:alpine` 浮动标签，版本不可控
+- 措施：锁定为 `nginx:1.24-alpine`，杜绝同类问题
