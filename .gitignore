@@ -11,3 +11,6 @@ nginx/logs/
 nginx/html/dtb/
 nginx/html/story/
 nginx/html/quiz/
+*.tar
+*.tar.gz
+*.zip
