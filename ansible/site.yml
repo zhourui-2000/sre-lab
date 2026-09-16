@@ -4,3 +4,4 @@
   roles:
     - base
     - security
+    - web

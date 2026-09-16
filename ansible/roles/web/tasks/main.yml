@@ -1,0 +1,28 @@
+---
+- name: 确保站点目录存在
+  file:
+    path: /opt/sre-lab/nginx/html
+    state: directory
+    mode: '0755'
+
+- name: 确保 grafana-data 目录属主正确（容器内 uid 472）
+  file:
+    path: /opt/sre-lab/observability/grafana-data
+    state: directory
+    owner: 472
+    group: 472
+    recurse: true
+
+- name: 部署 nginx 站点配置
+  copy:
+    src: default.conf
+    dest: /opt/sre-lab/nginx/conf.d/default.conf
+    mode: '0644'
+  notify: reload nginx
+
+- name: 部署证书自动续期定时任务
+  copy:
+    dest: /etc/cron.d/certbot-renew
+    content: |
+      0 3 * * * root certbot renew --quiet --deploy-hook "docker exec web nginx -s reload" >> /var/log/certbot-renew.log 2>&1
+    mode: '0644'
