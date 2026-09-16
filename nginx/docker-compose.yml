@@ -1,6 +1,6 @@
 services:
   web:
-    image: nginx:alpine
+    image: nginx:1.24-alpine
     container_name: web
     restart: unless-stopped
     ports:
