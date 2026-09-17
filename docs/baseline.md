@@ -118,3 +118,12 @@ text
 | node-exporter | 64m | 19MB | 保持 |
 
 可释放约 180MB。**但等运行一周取得真实峰值后再执行**，避免空载数据误导。
+
+## 环境前提：SELinux 为 Disabled（2026-09-17）
+
+- 现状：阿里云镜像预设 SELinux=Disabled，`semanage` 已安装
+- 影响：sshd 监听 2222 无需 SELinux 端口标签即可工作
+- 风险：若重建于默认 Enforcing 的环境（官方 ISO 安装的标准发行版），
+        sshd 绑定 2222 会 bind 失败导致无法远程登录
+- 现状决策：暂不启用 SELinux（学习环境，已有四层防护：安全组+密钥+非标准端口+fail2ban）
+- 若未来启用：需 `semanage port -a -t ssh_port_t -p tcp 2222`
