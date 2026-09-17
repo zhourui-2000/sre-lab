@@ -38,3 +38,6 @@
     name: fail2ban
     state: started
     enabled: true
+
+- name: 加固 SSH 服务
+  ansible.builtin.include_tasks: sshd.yml

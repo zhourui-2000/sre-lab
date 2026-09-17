@@ -14,3 +14,7 @@ nginx/html/quiz/
 *.tar
 *.tar.gz
 *.zip
+
+# 真实 inventory 含服务器地址，不进版本控制（兼容任意层级）
+hosts.ini
+!hosts.example.ini

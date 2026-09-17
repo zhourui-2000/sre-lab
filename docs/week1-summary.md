@@ -15,4 +15,4 @@
 
 ## 故障记录
 
-见 docs/baseline.md，共 4 起，均已定位根因并修复。
+见 docs/baseline.md，共 5 起，均已定位根因并修复。
