@@ -96,3 +96,25 @@ text
 | node-exporter | 64m | 19MB | 保持 |
 
 可释放约 180MB。**但等运行一周取得真实峰值后再执行**，避免空载数据误导。
+
+## 故障记录：Docker Hub 不可达（2026-09-14）
+
+- 现象：`docker compose up -d` 拉取 grafana / victoriametrics 超时
+- 诊断：node-exporter（quay.io）成功、grafana（docker.io）失败 → 网络整体正常，Docker Hub 单独被限
+- 试错：第三方公共镜像源返回 `denied: You may not login yet`，不可依赖
+- 处理：本机 `docker save` → scp → 服务器 `docker load`
+- 结论：外部 Registry 属不可控依赖，需建立自有镜像链路；镜像归档属构建产物，不进版本控制
+
+## 故障记录：firewalld 阻断容器间采集链路（2026-09-16）
+
+- 现象：VM 与 node-exporter 均正常运行，但 `up` 指标恒为 0
+- 诊断：容器同属 observability_default，排除网络配置；停 firewalld 后 `up` 立即变 1 → 定位为防火墙拦截容器间转发
+- 修复：`firewall-cmd --permanent --zone=trusted --add-source=172.16.0.0/12`
+- 结论：安全加固会改变系统行为边界，加固后必须回归验证业务与监控链路
+
+## 事故记录：Docker 镜像 tar 包误入 Git（2026-09-16）
+
+- 现象：`git push` 被拒，`File grafana.tar is 126.58 MB; exceeds 100.00 MB`
+- 根因：`git add .` 将镜像归档一并暂存；后续删除文件仅新增删除 commit，历史中大对象仍存在
+- 修复：`git filter-repo --invert-paths` 重写历史；`.gitignore` 补充 `*.tar`
+- 教训：构建产物不进版本控制；`git add .` 前先 `git status` 确认暂存内容
