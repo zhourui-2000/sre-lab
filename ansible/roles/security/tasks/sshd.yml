@@ -1,5 +1,5 @@
 ---
-# SSH 加固：所有变更均通过 validate 校验，语法错误不会落盘
+# SSH 加固：所有变更经 validate 校验，语法错误不落盘
 
 - name: 备份当前 sshd 配置（已存在则不覆盖）
   ansible.builtin.copy:
@@ -14,27 +14,19 @@
   register: selinux_state
   changed_when: false
 
-- name: 确保 firewalld 放行 SSH 端口 2222（幂等）
-  ansible.posix.firewalld:
-    port: 2222/tcp
-    permanent: true
-    state: enabled
-    immediate: true
-  when: ansible_facts.services is not defined or true
-
 - name: SELinux 环境放行 SSH 端口 2222
   block:
     - name: 确保 semanage 可用
       ansible.builtin.package:
         name: policycoreutils-python-utils
         state: present
-      register: semanage_pkg
-      failed_when: false
 
     - name: 添加 SSH 端口到 SELinux 策略
       ansible.builtin.command: semanage port -a -t ssh_port_t -p tcp 2222
       register: semanage_result
-      failed_when: false
+      failed_when:
+        - semanage_result.rc != 0
+        - "'already defined' not in semanage_result.stderr"
       changed_when: semanage_result.rc == 0
   when: selinux_state.stdout is defined and selinux_state.stdout == 'Enforcing'
 
@@ -43,9 +35,9 @@
     path: /etc/ssh/sshd_config
     regexp: "^{{ item.key }}\\s+"
     line: "{{ item.key }} {{ item.value }}"
+    insertbefore: '^Match'
     validate: /usr/sbin/sshd -t -f %s
     mode: '0600'
-    backup: false
   loop:
     - { key: 'Port',                    value: '2222' }
     - { key: 'PermitRootLogin',         value: 'prohibit-password' }
