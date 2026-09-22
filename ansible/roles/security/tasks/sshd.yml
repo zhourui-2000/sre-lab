@@ -1,7 +1,6 @@
 ---
-# SSH 加固：所有变更经 validate 校验，语法错误不落盘
-
-- name: 备份当前 sshd 配置（已存在则不覆盖）
+# SSH 加固：所有变更均通过 validate 校验，语法错误不会落盘
+- name: 备份当前 sshd 配置（仅首次，不覆盖已有备份）
   ansible.builtin.copy:
     src: /etc/ssh/sshd_config
     dest: /etc/ssh/sshd_config.orig
@@ -13,40 +12,44 @@
   ansible.builtin.command: getenforce
   register: selinux_state
   changed_when: false
+  failed_when: false
+  check_mode: false          # 干跑时也要拿到真实值
 
 - name: SELinux 环境放行 SSH 端口 2222
+  when: selinux_state.stdout | default('') == 'Enforcing'
   block:
     - name: 确保 semanage 可用
       ansible.builtin.package:
         name: policycoreutils-python-utils
         state: present
 
-    - name: 添加 SSH 端口到 SELinux 策略
-      ansible.builtin.command: semanage port -a -t ssh_port_t -p tcp 2222
+    - name: 添加或修正 SSH 端口的 SELinux 标签
+      # semanage 没有幂等模式：-a 已存在会报错，故退回 -m
+      ansible.builtin.shell:
+        cmd: >-
+          semanage port -a -t ssh_port_t -p tcp 2222 2>/dev/null
+          || semanage port -m -t ssh_port_t -p tcp 2222
       register: semanage_result
-      failed_when:
-        - semanage_result.rc != 0
-        - "'already defined' not in semanage_result.stderr"
       changed_when: semanage_result.rc == 0
-  when: selinux_state.stdout is defined and selinux_state.stdout == 'Enforcing'
 
 - name: 应用 sshd 安全参数
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
-    regexp: "^{{ item.key }}\\s+"
+    regexp: '^#?{{ item.key }}[ \t]+'   # 锚定行首：# 后不允许空白，避开缩进示例行
     line: "{{ item.key }} {{ item.value }}"
-    insertbefore: '^Match'
     validate: /usr/sbin/sshd -t -f %s
     mode: '0600'
+    backup: true
   loop:
-    - { key: 'Port',                    value: '2222' }
-    - { key: 'PermitRootLogin',         value: 'prohibit-password' }
-    - { key: 'PasswordAuthentication',  value: 'no' }
-    - { key: 'PubkeyAuthentication',    value: 'yes' }
-    - { key: 'PermitEmptyPasswords',    value: 'no' }
-    - { key: 'X11Forwarding',           value: 'no' }
-    - { key: 'MaxAuthTries',            value: '3' }
-    - { key: 'LoginGraceTime',          value: '30' }
-    - { key: 'ClientAliveInterval',     value: '300' }
-    - { key: 'ClientAliveCountMax',     value: '2' }
+    - { key: 'Port',                  value: '2222' }
+    - { key: 'PermitRootLogin',       value: 'prohibit-password' }
+    - { key: 'PasswordAuthentication', value: 'no' }
+    - { key: 'PubkeyAuthentication',  value: 'yes' }
+    - { key: 'PermitEmptyPasswords',  value: 'no' }
+    - { key: 'X11Forwarding',         value: 'no' }
+    - { key: 'MaxAuthTries',          value: '3' }
+    - { key: 'LoginGraceTime',        value: '30' }
+    - { key: 'ClientAliveInterval',   value: '300' }
+    - { key: 'ClientAliveCountMax',   value: '2' }
   notify: restart sshd
+

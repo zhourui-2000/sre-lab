@@ -21,6 +21,7 @@
   command: swapon --show=NAME --noheadings
   register: swapon_devices
   changed_when: false
+  check_mode: false
 
 - name: 格式化并启用 swap（仅当尚未启用时）
   command: "{{ item }}"
