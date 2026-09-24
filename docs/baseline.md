@@ -127,3 +127,15 @@ text
         sshd 绑定 2222 会 bind 失败导致无法远程登录
 - 现状决策：暂不启用 SELinux（学习环境，已有四层防护：安全组+密钥+非标准端口+fail2ban）
 - 若未来启用：需 `semanage port -a -t ssh_port_t -p tcp 2222`
+## 故障记录：sshd 加固改动未生效（2026-09-22）
+
+- 现象：playbook 报 X11Forwarding changed，但 `sshd -T` 显示仍为 yes
+- 诊断：lineinfile 语义为「替换最后一条匹配行」（源码 index[0]=lineno，
+  仅 firstmatch:yes 才 break）；原 regexp `^#?\s*KEY\s+` 命中文件内
+  #Match 示例块的缩进行（第140行），而激活行在第104行 → 改动落在无效位置
+- 叠加因素：sshd 对多数指令取「首个有效值」，104 行在前，故 140 行的新值永不生效
+- 修复：regexp 收紧为 `^#?KEY[ \t]+`（# 后不允许空白，锚定行首）
+- 验证：sshd -T 九项生效值 + 连续两次运行 changed=3 → changed=0
+- 教训：lineinfile 只能保证「改了文件」，不等于「改了生效值」，必须用
+  sshd -T / nginx -T 这类配置自检命令做验收
+
