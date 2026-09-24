@@ -1,5 +1,8 @@
 {
-  "registry-mirrors": ["https://mzmfuqbg.mirror.aliyuncs.com"],
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://mzmfuqbg.mirror.aliyuncs.com"
+  ],
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "50m",
