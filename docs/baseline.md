@@ -92,6 +92,7 @@ k3s 需 700–900MB。**处于边界，需实测后决策**（见 docs/capacity.
 - 修复：改用 `listen 443 ssl http2;`（兼容写法）
 - 根因中的根因：使用了 `nginx:alpine` 浮动标签，版本不可控
 - 措施：锁定为 `nginx:1.24-alpine`，杜绝同类问题
+
 ## 实测更新（2026-09-16）
 
 原估算"可观测栈 576MB"偏保守，**实测仅 230MB**。
@@ -127,6 +128,7 @@ text
         sshd 绑定 2222 会 bind 失败导致无法远程登录
 - 现状决策：暂不启用 SELinux（学习环境，已有四层防护：安全组+密钥+非标准端口+fail2ban）
 - 若未来启用：需 `semanage port -a -t ssh_port_t -p tcp 2222`
+
 ## 故障记录：sshd 加固改动未生效（2026-09-22）
 
 - 现象：playbook 报 X11Forwarding changed，但 `sshd -T` 显示仍为 yes
@@ -138,4 +140,41 @@ text
 - 验证：sshd -T 九项生效值 + 连续两次运行 changed=3 → changed=0
 - 教训：lineinfile 只能保证「改了文件」，不等于「改了生效值」，必须用
   sshd -T / nginx -T 这类配置自检命令做验收
+
+## 故障记录：服务器配置未生效——git pull 静默失败（2026-09-24）
+
+- 现象：本机已推送「锁定 nginx 镜像版本」等提交，服务器执行
+  `docker compose up -d --force-recreate web` 后，`docker ps` 仍显示旧镜像 `nginx:alpine`
+- 第一层误判：以为 compose 没改或重建命令无效 —— 实际是**服务器上的仓库根本没更新**
+- 诊断路径：
+  - `git log --oneline -1` → 服务器 HEAD 仍停在 8 个提交之前（`265f687`）
+  - `git status --short` → 存在两处本地改动（`nginx/conf.d/default.conf`、`nginx/html/index.html`）
+  - 结论：被改动的文件在远端本次提交中也要变更 → git 拒绝 pull
+- 叠加因素：daemon.json 的原镜像加速器已失效，docker 回退直连 `registry-1.docker.io`
+  后超时 → 即使 compose 更新，目标镜像也拉不下来
+- 修复：
+  1. 备份 → `git stash push <两个文件>` → `git pull`（通过）
+  2. 复核 stash：`default.conf` 的改动与仓库既有提交同内容（重复修改，可丢弃）
+  3. 镜像改走前缀：`docker pull docker.m.daocloud.io/library/nginx:1.24-alpine`
+     → `docker tag` 回 `nginx:1.24-alpine`（免去 save/scp/load）
+  4. 清理 `.bak` 残留与旧镜像
+- 根因：**「服务器只 pull、不改文件」的约定被破坏**。一旦服务器上有本地改动，
+  pull 就失败，而这条报错混在长输出里极易被当成噪音划过，最终表现为
+  「我明明改了配置却没生效」
+- 教训：
+  - 服务器上出现 `M` 状态文件即是红灯，必须先处理再谈部署
+  - 「改了配置」与「配置生效」之间必须有一次校验：`git log -1` + `docker inspect` 实际镜像
+  - 手工 pull 流程没有失败中断机制 → 这是第 4 周引入 GitOps 的直接动机
+
+## 附：镜像获取途径实测（2026-09-24）
+
+| 途径 | 结果 |
+|---|---|
+| 直连 `registry-1.docker.io` | ❌ 超时（`Client.Timeout exceeded`） |
+| 阿里云专属加速器（原 daemon.json 配置） | ❌ 实际已失效：docker 回退直连后超时 |
+| `docker.m.daocloud.io/` 前缀 | ✅ 服务器实测拉取成功 |
+
+- 处置：`registry-mirrors` 调整为 daocloud 优先，阿里云条目保留作后备
+- 注意：`registry-mirrors` **只对 docker.io 生效**；quay.io / ghcr.io 等仍需前缀方式
+  （`quay.m.daocloud.io` / `ghcr.m.daocloud.io`），此前拉取 node-exporter 即属此类
 
