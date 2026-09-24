@@ -18,3 +18,7 @@ nginx/html/quiz/
 # 真实 inventory 含服务器地址，不进版本控制（兼容任意层级）
 hosts.ini
 !hosts.example.ini
+# 容器运行时数据（指标库 / Grafana 数据），永不入库
+observability/vmdata/
+observability/grafana-data/
+

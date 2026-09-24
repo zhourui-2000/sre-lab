@@ -9,6 +9,7 @@ services:
       - '--promscrape.config=/vmdata/scrape.yml'
     volumes:
       - ./vmdata:/vmdata
+      - ./scrape.yml:/vmdata/scrape.yml:ro
     ports:
       - "127.0.0.1:8428:8428"
     mem_limit: 256m
