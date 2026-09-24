@@ -178,3 +178,25 @@ text
 - 注意：`registry-mirrors` **只对 docker.io 生效**；quay.io / ghcr.io 等仍需前缀方式
   （`quay.m.daocloud.io` / `ghcr.m.daocloud.io`），此前拉取 node-exporter 即属此类
 
+## 故障记录：web 容器 healthcheck 恒为 unhealthy（2026-09-24）
+
+- 现象：CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES 显示 ，已持续多日；业务访问正常
+- 第一层误判：以为是 HTTP 全量 301 导致 healthcheck 失败 —— **假设未经验证**
+- 实测推翻（关键动作：先跑一条命令，而不是先下结论）：
+  -  → EXIT=0
+  -  → EXIT=1（Connection refused）
+  - 127.0.0.1       localhost localhost localhost.localdomain
+127.0.1.1       localhost localhost localhost.localdomain → ；容器 /etc/hosts 中 localhost 同时指向 127.0.0.1 与 ::1
+  -  → nginx 仅监听 0.0.0.0:80 / 0.0.0.0:443，无 IPv6 监听
+- 根因：healthcheck 使用 ，容器内解析优先返回 IPv6 ，
+  而 nginx  只绑定 IPv4 → 连接被拒；busybox wget 不会回退重试 IPv4
+- 修复：
+  1. healthcheck 改用 （显式 IPv4）
+  2. 新增 ，
+     使健康检查不再依赖 301 跳转 → 公网 → 发夹回环 → 证书这条脆弱链路
+- 验证： 通过； 返回 ok；
+  一个检查周期后状态变为 healthy；站点 200 / HTTP 301 跳转逻辑保持
+- 教训：
+  - ** 不等于 **：多栈解析下可能先走 IPv6，健康检查、探针、
+    inter-container 调用一律写显式地址或用服务名
+  - 健康检查必须自包含：只验证本进程可用性，不引入 DNS、外网、证书等外部依赖
