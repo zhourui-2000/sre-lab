@@ -11,28 +11,27 @@
     name: firewalld
     state: started
     enabled: true
+# ── 预检：只读查询每条规则当前是否已放行 ──────────────────
+- name: 预检 firewalld 放行状态（只读）
+  ansible.builtin.command: "firewall-cmd --permanent --zone={{ item.zone }} --query-{{ item.kind }}={{ item.value }}"
+  loop:
+    - { kind: port,    zone: public,  value: '2222/tcp' }
+    - { kind: service, zone: public,  value: 'http' }
+    - { kind: service, zone: public,  value: 'https' }
+    - { kind: source,  zone: trusted, value: '172.16.0.0/12' }
+  register: fw_query
+  changed_when: false
+  failed_when: false      # 目的：rc=1 是「尚未放行」，不是执行失败
+  check_mode: false       # 目的：只读查询，干跑时也要拿到真值
 
-- name: 放行 SSH 端口
-  ansible.builtin.firewalld:
-    port: 2222/tcp
-    permanent: true
-    state: enabled
+# ── 变更：只补缺的那几条 ─────────────────────────────────
+- name: 放行所需端口 / 服务 / 网段
+  ansible.builtin.command: "firewall-cmd --permanent --zone={{ item.item.zone }} --add-{{ item.item.kind }}={{ item.item.value }}"
+  loop: "{{ fw_query.results }}"
+  loop_control:
+    label: "{{ item.item.kind }}={{ item.item.value }} @{{ item.item.zone }}"
+  when: item.rc != 0      # 目的：已放行的跳过 —— 这就是幂等
   notify: reload firewalld
-
-- name: 放行 HTTP
-  ansible.builtin.firewalld:
-    service: http
-    permanent: true
-    state: enabled
-  notify: reload firewalld
-
-- name: 放行 HTTPS
-  ansible.builtin.firewalld:
-    service: https
-    permanent: true
-    state: enabled
-  notify: reload firewalld
-
 - name: 确保 fail2ban 开机并运行
   ansible.builtin.systemd:
     name: fail2ban
