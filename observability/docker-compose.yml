@@ -1,6 +1,6 @@
 services:
   victoriametrics:
-    image: victoriametrics/victoria-metrics
+    image: victoriametrics/victoria-metrics:${VM_VER}
     container_name: victoriametrics
     command:
       - '--storageDataPath=/vmdata'
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   node-exporter:
-    image: quay.io/prometheus/node-exporter
+    image: quay.io/prometheus/node-exporter:${NE_VER}
     container_name: node-exporter
     command: ['--path.rootfs=/host']
     pid: host
