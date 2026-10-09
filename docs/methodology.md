@@ -95,6 +95,33 @@
   但 `assert` 本身也是模块，同样依赖目标机 Python，而 Python 恰恰是坏掉的那一环。
 - 做法：设计校验时，先确认**校验手段自己能不能跑起来**。
 
+## ⑪ 改了被挂载的配置 ≠ 容器生效（`up -d` 是 no-op）
+
+- 来源：2026-10-09，把 alertmanager 的 receiver 从 webhook 换成 SMTP 后跑 `docker compose up -d`，
+  **容器根本没重建**，仍在跑旧配置（日志里还是 `integration=webhook[0]`）；
+  直到加 `--force-recreate` 才生效。
+- 机制有两层，都得知道：
+  - **compose 层**：`up -d` 只比较**服务定义**（image/command/ports…），**不比较挂载文件的内容** → 判定"无需变更"；
+  - **Docker 层**：`cp` 或编辑器覆盖文件会**换 inode**，旧容器的 bind-mount 仍指向**旧 inode** → 连 `restart` 也不管用。
+- 做法：**只要改的是被挂载的配置文件，一律 `docker compose up -d --force-recreate <svc>`**，
+  并用 `docker exec <svc> cat <容器内路径>` 确认容器读到的是新内容。
+- 同族：① 在**配置解析层**，本条在**挂载层**——同一个病，换了个器官。
+
+## ⑫ 收紧权限前，先确认「谁要读它」
+
+- 来源：2026-10-09，为保护 SMTP 授权码给 alertmanager 配置 `chmod 600`，
+  结果容器 crash loop —— 镜像以 **`nobody`** 运行，读不到 root 私有的文件
+  （`error loading configuration file: ... permission denied`）。
+- 机制：`600 + root:root` 对**非 root 的消费进程**等于"文件不存在"。
+- 做法：
+  - 先查消费方身份：`docker inspect <c> --format '{{.Config.User}}'`；
+  - 判据必须取**消费方视角**：`docker exec <c> cat <路径>`，
+    而不是在宿主用 `sudo -u nobody cat <宿主机路径>`（会被目录权限挡住，产生**假阴性**）。
+- 附带结论：**"更严的权限"未必"更安全"**。600 挡不住宿主 root / docker 组（他们等效 root），
+  而它唯一多挡的"未来可能出现的第二个容器内身份"当前并不存在。
+  **真正的边界是：文件不入库 + 目录不可穿越 + 容器不持有宿主能力。**
+  详见 [ADR 0002](adr/0002-secret-file-permissions.md)。
+
 ---
 
 ## 历史脉络

@@ -38,6 +38,7 @@ services:
       - "127.0.0.1:3000:3000"
     mem_limit: 256m
     restart: unless-stopped
+
   vmalert:
     image: victoriametrics/vmalert:${VM_VER}    # 与 VictoriaMetrics 同版本，已在 2.0 拉齐
     container_name: vmalert
@@ -46,7 +47,7 @@ services:
       - '--rule=/rules/alert-rules.yml'
       - '--notifier.url=http://alertmanager:9093'
       - '--httpListenAddr=:8880'         # 目的：必须显式给，否则管理 API 不可达
-      - '--remoteWrite.url=http://victoriametrics:8428'
+      - '--remoteWrite.url=http://victoriametrics:8428'   # 目的：缺它则 ALERTS 不落库，VM 永远查不到
     volumes:
       - ./alert-rules.yml:/rules/alert-rules.yml:ro
     ports:
@@ -63,11 +64,11 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
     volumes:
-#      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro      
+      # 密钥文件在仓库外，且目录 700 / 文件 644（见 docs/adr/0002）
+      # ⚠️ 改完此文件必须 docker compose up -d --force-recreate alertmanager
       - /root/.sre-lab-secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./alertmanager-data:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
     mem_limit: 64m
     restart: unless-stopped
-

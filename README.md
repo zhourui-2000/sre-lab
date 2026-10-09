@@ -29,7 +29,7 @@ Internet
 
 可观测栈（全部收口 127.0.0.1）
   node-exporter:9100 ──► VictoriaMetrics:8428 ──► Grafana:3000
-                                 └─► vmalert:8880 ──► alertmanager:9093
+                                 └─► vmalert:8880 ──► alertmanager:9093 ──► 邮件
 ```
 
 ## 目录说明
@@ -37,8 +37,8 @@ Internet
 ```text
 ansible/       主机配置即代码（base：swap/sysctl/journald/docker；security：sshd/fail2ban/firewalld）
 nginx/         业务站点（容器化，配置与静态资源）
-observability/ 可观测栈（VictoriaMetrics / Grafana / 告警规则）
-docs/          容量预算、基线数据、演练记录、故障复盘
+observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager / 告警规则）
+docs/          基线、方法论、runbook、故障复盘、ADR
 ```
 
 ## 一键复现
@@ -51,19 +51,33 @@ ansible-playbook site.yml        # 应用主机配置
 
 幂等验证：连续执行两次，第二次 `changed=0`。
 
-> 真实 inventory 含服务器地址，不进版本控制：`~/.sre-lab-secrets/hosts.ini`。
+## 密钥与敏感文件（不入库）
+
+| 文件 | 位置 | 权限 | 说明 |
+|---|---|---|---|
+| Ansible inventory（含服务器地址） | 控制端 `~/.sre-lab-secrets/hosts.ini` | — | 仓库只留 `hosts.example.ini` |
+| alertmanager 配置（含 SMTP 授权码） | **服务器** `/root/.sre-lab-secrets/alertmanager.yml` | 目录 `700` / 文件 **`644`** | 仓库只留 `observability/alertmanager.yml.example` |
+
+> **为什么 alertmanager 配置是 `644` 而不是 `600`？**
+> 容器以 `nobody` 运行，`600 + root:root` 会让它读不到配置而 crash loop。
+> 保护来自**目录不可穿越**（`/root` 750 + 密钥目录 700），可读性来自 644。决策全文见
+> [`docs/adr/0002-secret-file-permissions.md`](docs/adr/0002-secret-file-permissions.md)。
+>
+> ⚠️ **新环境部署时**：`cp observability/alertmanager.yml.example /root/.sre-lab-secrets/alertmanager.yml`
+> → 填入授权码 → `chmod 644` → `docker compose up -d --force-recreate alertmanager`。
 
 ## 文档结构
 
-- `baseline.md` —— 当前已知良好状态与不变量（唯一真源快照）
-- `methodology.md` —— 经验规则 ①–⑩
-- `runbook.md` —— 症状速查
-- `incidents/` —— 每起故障一份
-- `adr/` —— 设计决策## 进度
+- [`docs/baseline.md`](docs/baseline.md) —— 当前已知良好状态与不变量
+- [`docs/methodology.md`](docs/methodology.md) —— 经验规则 ①–⑫
+- [`docs/runbook.md`](docs/runbook.md) —— 症状 → 定位命令 → 修复
+- [`docs/incidents/`](docs/incidents/) —— 每起故障一份
+- [`docs/adr/`](docs/adr/) —— 设计决策记录
 
 ## 项目进度
+
 - [x] Week 1  系统基线、安全加固、配置即代码
-- [ ] Week 2  可观测栈（指标 / 日志 / 告警）
+- [ ] Week 2  可观测栈 —— 指标 ✅ / 告警 ✅（邮件通知已闭环）/ 日志 ⏳
 - [ ] Week 3-4  k3s + GitOps 交付链路
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证

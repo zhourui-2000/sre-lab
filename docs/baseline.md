@@ -15,7 +15,8 @@
 | journald 占用 | **32.0 MB**（限额 500M 已生效） | `journalctl --disk-usage` |
 | 镜像拉取耗时 | 2.2s（加速器生效） | `time docker pull nginx:alpine` |
 
-**容量结论：磁盘不是瓶颈（19%），内存才是。** 简历故事应聚焦内存容量治理，"磁盘水位下降"这条不成立。
+**容量结论：磁盘不是瓶颈（19%），内存才是。**
+简历故事应聚焦内存容量治理 —— **"磁盘水位下降"这条不成立，不要硬写**（详见第五节与 `capacity.md`）。
 
 ## 二、安全
 
@@ -37,6 +38,11 @@
 - **同一份配置只允许一个真源**（多真源 = 迟早互相覆盖）。
 - **镜像固定版本标签**，禁用浮动标签（`:latest` / `:alpine`）。
 - **构建产物不进版本控制**（`*.tar` 等）。
+- **密钥配置放 `/root/.sre-lab-secrets/`**：目录 `700` + 文件 **`644`**。
+  ⚠️ **绝不 `chmod 600`** —— 容器以 `nobody` 运行会读不到而 crash loop。
+  保护来自**目录不可穿越**，可读性来自 644。见 [ADR 0002](adr/0002-secret-file-permissions.md)。
+- **改了被挂载的配置文件，必须 `docker compose up -d --force-recreate <svc>`**。
+  普通 `up -d` 只比较服务定义、不比较挂载内容，**是 no-op**（见 [methodology ⑪](methodology.md)）。
 
 ## 四、环境前提
 
@@ -48,6 +54,7 @@
   daocloud 前缀实测可用：`docker.m.daocloud.io/`（quay.io / ghcr.io 需 `quay.m.daocloud.io` / `ghcr.m.daocloud.io`）。
 - **网络**：公司网络 → GitHub 链路间歇不可用；本机 → 服务器、服务器 → GitHub 均稳定。
   推送走服务器中转，见 [`adr/0001-server-relay-push.md`](adr/0001-server-relay-push.md)。
+- **出网端口**：阿里云封 **25**，`smtp.qq.com:465` / `:587` 均**可达**（发告警邮件已验证）。
 
 ## 五、可观测栈实测
 
@@ -62,13 +69,20 @@
 
 **可观测栈合计约 230MB**，远低于预估的 576MB。部署后：可用内存 1143MB（看 available 而非 free）、磁盘 19%。
 
-**k3s 决策**：1143 − 750 = 393MB 余量 → 可上，但安装时须禁用内置 traefik / servicelb / metrics-server。
-（当前为空载数据，VM 内存随数据量增长，一周后复测峰值再定最终配额。）
+**2026-10-09 复测**（已加入 vmalert + alertmanager，容器数 4 → 6）：
+
+| 指标 | 09-16 | 10-09 |
+|---|---|---|
+| 可用内存 | 1143 MB | **1212 MB** |
+| 磁盘水位 | 19% | **25%**（9.2G / 40G，镜像与数据增长） |
+
+**k3s 决策**：以 10-09 为准，1212 − 750 ≈ 462MB 余量 → 仍可行，但安装时须禁用内置
+traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需再做一次峰值复测。）
 
 ## 六、待补基线
 
 - 手工部署一次耗时（停服 → 替换 → 启动 → 验证，掐表）
-- 可观测栈运行一周后的峰值内存
+- 可观测栈**满负载**峰值内存（10-09 复测为空载数据，不足以定配额）
 - GitOps 部署耗时（第 4 周）
 - 各类故障 MTTR、RTO/RPO（第 7 周）
 
@@ -86,3 +100,4 @@
 | 09-24 | healthcheck 恒 unhealthy | `localhost` 解析到 IPv6，nginx 只听 IPv4 | [→](incidents/2026-09-24-web-healthcheck-ipv6.md) |
 | 09-26 | 控制端重建连锁故障 | 环境漂移 + 缺生效性验证（5 个根因） | [→](incidents/2026-09-26-control-node-rebuild.md) |
 | 10-09 | ALERTS 恒空、告警静默 | 缺 `--remoteWrite.url` + alertmanager 未定义 | [→](incidents/2026-10-09-alert-chain-silent.md) |
+| 10-09 | 通知渠道再三踩坑 | `up -d` no-op / `smtp_from` 拼错 / 属主 / `chmod 600` | [→](incidents/2026-10-09-alert-chain-silent.md#第二阶段接通通知渠道) |

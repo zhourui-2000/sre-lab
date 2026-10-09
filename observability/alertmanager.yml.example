@@ -1,3 +1,24 @@
+# alertmanager 配置模板（仓库内只留本模板，真实文件不入库）
+#
+# 部署（授权码属凭据，绝不进 Git）：
+#   1) mkdir -p /root/.sre-lab-secrets && chmod 700 /root/.sre-lab-secrets
+#   2) cp alertmanager.yml.example /root/.sre-lab-secrets/alertmanager.yml
+#   3) vim /root/.sre-lab-secrets/alertmanager.yml    # 填真实邮箱与授权码
+#   4) chmod 644 /root/.sre-lab-secrets/alertmanager.yml
+#   5) cd /opt/sre-lab/observability && docker compose up -d --force-recreate alertmanager
+#
+# ⚠️ 必须是 644，不要 600：
+#    容器以 nobody 运行（docker inspect --format '{{.Config.User}}' → nobody），
+#    600 + root:root 会让它读不到配置 → crash loop（已实测）。
+#    保护来自【目录不可穿越】（/root 750 + 密钥目录 700），可读性来自 644。
+#    决策全文：docs/adr/0002-secret-file-permissions.md
+#
+# ⚠️ 授权码获取：QQ 邮箱 → 设置 → 账户 → 开启 IMAP/SMTP → 短信验证 → 复制 16 位授权码。
+#    授权码必须与下面的 smtp_from / smtp_auth_username 是【同一个邮箱】。
+#
+# ⚠️ 端口 465 是 implicit TLS，必须配 smtp_require_tls: false；
+#    若改用 587（STARTTLS）则设为 true。
+
 global:
   smtp_smarthost: 'smtp.qq.com:465'
   smtp_from: 'you@qq.com'
