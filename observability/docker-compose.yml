@@ -63,7 +63,8 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
     volumes:
-      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+#      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro      
+      - /root/.sre-lab-secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./alertmanager-data:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
