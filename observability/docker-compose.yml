@@ -38,3 +38,19 @@ services:
       - "127.0.0.1:3000:3000"
     mem_limit: 256m
     restart: unless-stopped
+  vmalert:
+    image: victoriametrics/vmalert:${VM_VER}    # 与 VictoriaMetrics 同版本，已在 2.0 拉齐
+    container_name: vmalert
+    command:
+      - '--datasource.url=http://victoriametrics:8428'
+      - '--rule=/rules/alert-rules.yml'
+      - '--notifier.url=http://alertmanager:9093'
+      - '--httpListenAddr=:8880'         # 目的：必须显式给，否则管理 API 不可达
+    volumes:
+      - ./alert-rules.yml:/rules/alert-rules.yml:ro
+    ports:
+      - "127.0.0.1:8880:8880"            # 目的：收口，别再重犯 0.0.0.0 的错
+    mem_limit: 64m
+    restart: unless-stopped
+    depends_on:
+      - victoriametrics
