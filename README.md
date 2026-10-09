@@ -53,7 +53,13 @@ ansible-playbook site.yml        # 应用主机配置
 
 > 真实 inventory 含服务器地址，不进版本控制：`~/.sre-lab-secrets/hosts.ini`。
 
-## 进度
+## 文档结构
+
+- `baseline.md` —— 当前已知良好状态与不变量（唯一真源快照）
+- `methodology.md` —— 经验规则 ①–⑩
+- `runbook.md` —— 症状速查
+- `incidents/` —— 每起故障一份
+- `adr/` —— 设计决策## 进度
 
 - [x] Week 1  系统基线、安全加固、配置即代码
 - [ ] Week 2  可观测栈（指标 / 日志 / 告警）
