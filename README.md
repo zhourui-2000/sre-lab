@@ -61,6 +61,7 @@ ansible-playbook site.yml        # 应用主机配置
 - `incidents/` —— 每起故障一份
 - `adr/` —— 设计决策## 进度
 
+## 项目进度
 - [x] Week 1  系统基线、安全加固、配置即代码
 - [ ] Week 2  可观测栈（指标 / 日志 / 告警）
 - [ ] Week 3-4  k3s + GitOps 交付链路
