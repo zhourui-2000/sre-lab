@@ -55,3 +55,18 @@ services:
     restart: unless-stopped
     depends_on:
       - victoriametrics
+
+  alertmanager:
+    image: quay.io/prometheus/alertmanager:${AM_VER}
+    container_name: alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    mem_limit: 64m
+    restart: unless-stopped
+

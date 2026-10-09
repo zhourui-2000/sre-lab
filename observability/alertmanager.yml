@@ -1,0 +1,14 @@
+route:
+  receiver: 'default'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 1h
+
+receivers:
+  - name: 'default'
+    # 目的：先让告警「有个去处」，真正接通知渠道（邮件/微信/钉钉）下一步再做
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/empty'      # 占位，仅用于验证接收
+        send_resolved: true
+
