@@ -22,3 +22,6 @@ hosts.ini
 observability/vmdata/
 observability/grafana-data/
 
+
+# 含 SMTP 授权码，不入库
+observability/alertmanager.yml

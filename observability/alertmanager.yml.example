@@ -1,0 +1,21 @@
+global:
+  smtp_smarthost: 'smtp.qq.com:465'
+  smtp_from: 'you@qq.com'
+  smtp_auth_username: 'you@qq.com'
+  smtp_auth_password: 'REPLACE_WITH_QQ_AUTH_CODE'
+  smtp_require_tls: false
+
+route:
+  receiver: 'default'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 1h
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'you@qq.com'
+        send_resolved: true
+        headers:
+          Subject: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
