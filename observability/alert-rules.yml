@@ -13,24 +13,24 @@ groups:
 
       # 目的：40G 盘最怕被容器日志和镜像悄悄吃满
       - alert: DiskWillFillSoon
-        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 80
-        for: 5m
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 23
+        for: 0s
         labels: { severity: warning }
         annotations:
           summary: "根分区使用率超过 80%"
 
       # 目的：2G 机器的头号约束，OOM 之前必须有人知道
       - alert: MemoryHigh
-        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
-        for: 5m
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 31
+        for: 0s
         labels: { severity: warning }
         annotations:
           summary: "内存使用率超过 85%，接近 OOM"
 
       # 目的：swap 长期被占用 = 物理内存不够了，这是 k3s 决策的关键输入
       - alert: SwapInUse
-        expr: (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100 > 50
-        for: 10m
+        expr: (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100 > 1
+        for: 0s
         labels: { severity: info }
         annotations:
           summary: "swap 使用率超过 50%"
