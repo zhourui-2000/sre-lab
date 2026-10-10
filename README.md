@@ -47,6 +47,8 @@ docs/          基线、方法论、runbook、故障复盘、ADR
 cd ansible
 ansible lab -m ping              # 测试连通
 ansible-playbook site.yml        # 应用主机配置
+ > 例外：observability/alertmanager.yml 含 SMTP 授权码，不入库；
+ > 新环境需 cp alertmanager.yml.example alertmanager.yml 后填入授权码（600 权限）。
 ```
 
 幂等验证：连续执行两次，第二次 `changed=0`。
@@ -77,8 +79,10 @@ ansible-playbook site.yml        # 应用主机配置
 ## 项目进度
 
 - [x] Week 1  系统基线、安全加固、配置即代码
-- [ ] Week 2  可观测栈 —— 指标 ✅ / 告警 ✅（邮件通知已闭环）/ 日志 ⏳
-- [ ] Week 3-4  k3s + GitOps 交付链路
+- [x] Week 2  可观测栈
+   - [x] 指标 —— node-exporter → VictoriaMetrics → Grafana
+   - [x] 告警 —— 4 条规则端到端验证（检测 / 落库 / 送达 / 通知四环）+ 邮件通知
+   - [ ] 日志 —— 集中日志（Loki）未做；当前仅 journald 500M 限额 + docker 日志轮转- [ ] Week 3-4  k3s + GitOps 交付链路
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证
 - [ ] Week 8  材料化
