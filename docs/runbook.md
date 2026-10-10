@@ -13,6 +13,7 @@
 | `docker compose up` 直接退出无提示 | `docker compose config` | 按报错修 YAML（注意 `test` 数组里的数字要加引号） |
 | Ansible 报模块错误 / ping 失败 | `ansible lab -m ping -vvv`，看 `module_stderr` | 确认 inventory 用 `/usr/bin/python3.11` |
 | 推送后服务器没变 | `tail -3 /var/log/sre-relay.log` + `git log --oneline -1` | 钩子失败不回滚，需手工重推 |
+| **还原/回滚了但没生效** | `git log --oneline -4` 看那条 Revert 提交的标题对不对 | 用显式 SHA 重来，见下节「回滚操作」 |
 | `git push` 挂起无输出 | `ssh -T git@github.com` | 切手机热点，或 `git push relay main` |
 
 ## 观测类
@@ -62,6 +63,34 @@ docker logs alertmanager --tail 10 | grep -iE "permission|error|Listening"
 >
 > ⚠️ **文件权限保持 `644`，不要改成 600**：容器以 `nobody` 运行，600 会让它读不到而 crash loop。
 > 保护来自目录权限，不来自文件权限（见 [ADR 0002](../adr/0002-secret-file-permissions.md)）。
+
+## 回滚 / 还原操作的固定动作
+
+> **不要用 `HEAD` / `HEAD~1` 当还原目标。** 相对引用指向「当前位置」，
+> 期间任何新提交都会让它指向别的东西 —— 而这类错位**后果是静默的**：
+> 撤销了无关改动（你多半发现不了），真正该撤的临时配置却留在生产里。
+
+```sh
+cd /root/sre-lab
+
+# ① 定位：按提交信息找到 SHA（不要数 HEAD~n）
+git log --oneline -8
+SHA=$(git log --format='%H %s' | grep -m1 '<提交信息关键词>' | cut -d' ' -f1)
+echo "将要还原：$SHA"
+
+# ② 动手前复核：改的文件必须就是你想动的那个
+git show --stat "$SHA"
+
+# ③ 显式 SHA 还原
+git revert --no-edit "$SHA"
+
+# ④ 确认那条 Revert 提交指向的是目标提交（标题里应出现原提交的关键词）
+git log --oneline -3
+
+git push relay main
+```
+
+还原后仍要按「改了被挂载的配置文件」走一遍 `--force-recreate`，并**验生效值**。
 
 ## 推送后必做（relay 链）
 

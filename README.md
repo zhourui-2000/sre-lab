@@ -69,7 +69,7 @@ ansible-playbook site.yml        # 应用主机配置
 ## 文档结构
 
 - [`docs/baseline.md`](docs/baseline.md) —— 当前已知良好状态与不变量
-- [`docs/methodology.md`](docs/methodology.md) —— 经验规则 ①–⑫
+- [`docs/methodology.md`](docs/methodology.md) —— 经验规则（编号持续增加）
 - [`docs/runbook.md`](docs/runbook.md) —— 症状 → 定位命令 → 修复
 - [`docs/incidents/`](docs/incidents/) —— 每起故障一份
 - [`docs/adr/`](docs/adr/) —— 设计决策记录
