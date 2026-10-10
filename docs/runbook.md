@@ -21,7 +21,6 @@
 |---|---|---|
 | Grafana 无数据 / `up=0` | `curl -s 127.0.0.1:8428/api/v1/targets` | 查 firewalld 是否拦 trusted 网段；确认容器同一网络 |
 | 告警规则不触发 | `curl -s 127.0.0.1:8880/api/v1/rules` 看 `health` | 查规则文件是否挂载、表达式是否成立 |
-| **改了告警规则但没触发** | `curl -s 127.0.0.1:8880/api/v1/rules` → 比对 `query`/`duration` 与文件内容 | `docker compose up -d --force-recreate vmalert` |
 | 规则 firing 但 VM 查不到 `ALERTS` | `docker inspect vmalert --format '{{.Config.Cmd}}'` | 补 `--remoteWrite.url` |
 | 规则 firing 但 alertmanager 收不到 | `docker logs vmalert --tail 40 \| grep -i notifier` | 确认 alertmanager 服务存在、`--notifier.url` 可达 |
 | 收到告警但没人被通知 | 三点同验 + 查收件箱，见 [`methodology ⑦`](methodology.md) | 查 `docker logs alertmanager \| grep -i smtp` |
@@ -31,12 +30,7 @@
 ## 改了被挂载的配置文件（★ 最容易踩）
 
 > **改配置 ≠ 容器生效。** `docker compose up -d` 只比较**服务定义**，不比较挂载文件内容；
-> 而且 `cp` / 编辑器 / `git pull` 覆盖文件都是 **rename 替换** → **换 inode**，旧容器仍指向旧 inode —— 连 `restart` 都不管用。
-> **一律 `--force-recreate`。**
-
-> **热重载不是兜底。** 程序自带的文件监视（vmalert / nginx 等）靠 **inotify**，而 inotify 盯的是 **inode**；
-> 文件被 rename 替换后监视对象就消失了，**不会自动重载**（2026-10-10 实测踩到）。
-> 只有 `--force-recreate` 可靠。
+> 而且覆盖文件会**换 inode**，旧容器仍指向旧 inode —— 连 `restart` 都不管用。**一律 `--force-recreate`。**
 
 ```sh
 cd /opt/sre-lab/observability

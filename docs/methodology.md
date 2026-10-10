@@ -97,29 +97,15 @@
 
 ## ⑪ 改了被挂载的配置 ≠ 容器生效（`up -d` 是 no-op）
 
-- **来源①**：2026-10-09，把 alertmanager 的 receiver 从 webhook 换成 SMTP 后跑 `docker compose up -d`，
-  **容器根本没重建**，仍在跑旧配置（日志里还是 `integration=webhook[0]`）；直到加 `--force-recreate` 才生效。
-- **来源②（次日即复现）**：2026-10-10，为了验证告警规则，临时把 `alert-rules.yml` 的阈值压低、`for` 改成 `0s`，
-  `git pull` + `up -d vmalert` 之后 —— 文件里三条规则明明是新阈值，
-  **vmalert 加载的却还是前一天的旧值**，结果是「告警邮件一封都没收到」。
-- 机制有三层，都得知道：
+- 来源：2026-10-09，把 alertmanager 的 receiver 从 webhook 换成 SMTP 后跑 `docker compose up -d`，
+  **容器根本没重建**，仍在跑旧配置（日志里还是 `integration=webhook[0]`）；
+  直到加 `--force-recreate` 才生效。
+- 机制有两层，都得知道：
   - **compose 层**：`up -d` 只比较**服务定义**（image/command/ports…），**不比较挂载文件的内容** → 判定"无需变更"；
-  - **Docker 层**：`cp` 或编辑器覆盖文件会**换 inode**，旧容器的 bind-mount 仍指向**旧 inode** → 连 `restart` 也不管用；
-  - **热重载层**（来源②暴露）：**即使程序支持热重载，也未必救得回来**。inotify 盯的是 **inode**，
-    而 `git pull` / `cp` / 编辑器写入都是 **rename 替换**文件 → 监视对象消失 → 不会触发重载。
-    **不要把"它有热重载"当成兜底。**
-- 做法：**只要改的是被挂载的配置文件，一律 `docker compose up -d --force-recreate <svc>`**。
-- **判据要求（关键）**：对"加载型"组件，验收必须打**它自己报告的生效值**，而不是 `grep` 文件内容：
-
-| 组件 | 生效值怎么看 |
-|---|---|
-| vmalert | `curl -s 127.0.0.1:8880/api/v1/rules` → 看 `query` 与 `duration` |
-| nginx | `nginx -t`（注意 `nginx -T` 只是读盘解析并打印，**不等于运行态**） |
-| sshd | `sshd -T` |
-| 任意容器读到的配置 | `docker exec <svc> cat <容器内路径>` |
-
-- 同族：① 在**配置解析层**，本条在**挂载 / 加载层**——同一个病，换了个器官。
-  两天内三次复现（09-24 nginx 未 reload、10-09 alertmanager、10-10 vmalert），说明它不是偶发，而是**默认会发生的**。
+  - **Docker 层**：`cp` 或编辑器覆盖文件会**换 inode**，旧容器的 bind-mount 仍指向**旧 inode** → 连 `restart` 也不管用。
+- 做法：**只要改的是被挂载的配置文件，一律 `docker compose up -d --force-recreate <svc>`**，
+  并用 `docker exec <svc> cat <容器内路径>` 确认容器读到的是新内容。
+- 同族：① 在**配置解析层**，本条在**挂载层**——同一个病，换了个器官。
 
 ## ⑫ 收紧权限前，先确认「谁要读它」
 
