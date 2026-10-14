@@ -54,6 +54,7 @@ scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务�
 # 控制端若为新迁移 / 重建的，先做权限收敛与配置读取确认（见 docs/runbook.md）
 find /root/sre-lab -perm -o+w | wc -l   # 期望 0；非 0 则 chmod -R go-w /root/sre-lab
 ansible --version | grep 'config file'  # 必须指向本仓库的 ansible.cfg，否则配置根本没被加载
+git config core.fileMode                # 期望 true；false 则 chmod +x 不会入索引，重建后脚本不可执行
 
 cd ansible
 ansible lab -m ping              # 测试连通

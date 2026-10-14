@@ -70,6 +70,13 @@
   ⚠️ **`6443/tcp` 刻意不对外开放**：单节点没有外部节点需要访问 apiserver，
   k3s 官方文档的 `--add-port=6443/tcp` 是给多节点集群的，照抄等于在公网开一个 API 端点。
   收口靠 firewalld + 云安全组，并实测外部不可达。
+- **文件权限也是配置的一部分，且以「索引里记录的模式」为准**。
+  `core.fileMode` 必须为 `true`（跨文件系统迁移会让 git 自动关掉它）；
+  否则 `chmod +x` 不会入索引，**重建出来的机器上脚本不可执行**。
+  验收用 `git clone` 实测磁盘权限（见 [methodology ⑯](methodology.md)）。
+- **判断远端状态必须用实时查询**（`git ls-remote`，带重试），
+  **不得使用 `origin/main` 等本地缓存引用**；验证命令**不得吞 stderr**（`2>/dev/null`）——
+  那会让失败伪装成结论（2026-10-14 一天内三次踩到，见 [methodology ⑯](methodology.md)）。
 
 ## 四、环境前提
 
@@ -146,3 +153,5 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 | 10-09 | ALERTS 恒空、告警静默 | 缺 `--remoteWrite.url` + alertmanager 未定义 | [→](incidents/2026-10-09-alert-chain-silent.md) |
 | 10-09 | 通知渠道再三踩坑 | `up -d` no-op / `smtp_from` 拼错 / 属主 / `chmod 600` | [→](incidents/2026-10-09-alert-chain-silent.md#第二阶段接通通知渠道) |
 | 10-14 | 控制端迁移后 Ansible 静默失效 | 权限回落 `0777`，Ansible 拒读全局可写目录下的配置 | [→](incidents/2026-10-14-migration-perms-ansible-cfg.md) |
+| 10-14 | 防火墙持久配置漂移 28 天 | 增量式 IaC 只加不删；回填 IaC 时凭记忆漏了一条 | [→](incidents/2026-10-14-firewall-drift-incremental-iac.md) |
+| 10-14 | 可执行位未进版本控制 / GitHub 状态被误判 | 缓存与索引被当成事实；核验命令吞掉了 stderr | [→](incidents/2026-10-14-indirect-evidence-as-fact.md) |

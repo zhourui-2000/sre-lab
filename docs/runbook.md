@@ -16,6 +16,9 @@
 | 推送后服务器没变 | `tail -3 /var/log/sre-relay.log` + `git log --oneline -1` | 钩子失败不回滚，需手工重推 |
 | **还原/回滚了但没生效** | `git log --oneline -4` 看那条 Revert 提交的标题对不对 | 用显式 SHA 重来，见下节「回滚操作」 |
 | `git push` 挂起无输出 | `ssh -T git@github.com` | 切手机热点，或 `git push relay main` |
+| **重建后脚本 `Permission denied`**（磁盘上明明是 `755`） | `git ls-files -s <file>` + `git config core.fileMode` | `git config core.fileMode true` → `git add` 提交；**用 `git clone` 实测**（见下节） |
+| **`git status` 显示 ahead / behind，但实际已同步** | `git ls-remote origin refs/heads/main`（实时） | 本地引用过期，**不是真分叉**；`origin/main` 不作证据 |
+| 服务器上出现 IaC 里没有的防火墙规则 | `python3 scripts/check-fw-drift.py` | 补进 `security` 角色 loop，或从服务器移除（**增量式 IaC 不会替你删**） |
 
 ## 观测类
 
@@ -119,6 +122,14 @@ cd /root/sre-lab/ansible && ansible lab -m ping
 
 # ④ 工具链版本（控制端 Python 决定 ansible-core 上限）
 ansible --version | head -1
+
+# ⑤ 权限位是否真的进了版本控制
+#    磁盘 755 ≠ 索引 755 ≠ 重建后 755 —— 会被重建的是【索引里记录的模式】
+git config core.fileMode                    # 期望 true（false 则 chmod +x 完全不生效）
+git ls-files -s scripts/check-fw-drift.py   # 期望 100755
+git clone -q /root/sre-lab /tmp/clone-check # 实测重建结果
+stat -c '%a' /tmp/clone-check/scripts/check-fw-drift.py   # 期望 755
+rm -rf /tmp/clone-check
 ```
 
 > ⚠️ **`--syntax-check` 通过不算通过验收** —— 它不依赖 inventory，
@@ -135,3 +146,13 @@ cd /opt/sre-lab && git log --oneline -1     # 工作副本是否已同步
 
 > `post-receive` 钩子**失败不会拒绝推送**——relay 已收到提交，但 GitHub / 工作副本可能没同步。
 > 所以推完必须校验这两条，不能只看"推送成功"。
+
+完整核验用工作区脚本 **`check-three-ends.sh`**（四方：local / relay / server / GitHub 实时，
+含重试与钩子日志兜底，退出码 `0`/`1`）。
+
+> ⚠️ **不要用 `git fetch origin && git rev-parse origin/main` 判断 GitHub。**
+> `origin/main` 只是**本地缓存**，`git fetch` 失败（WSL2 DNS 间歇）时**不报错、只保留旧值** ——
+> 过期缓存会被读成"GitHub 落后"。这个假信号已出现 **3 次**。判断远端一律 `git ls-remote`。
+
+> ⚠️ **核验命令不要写 `2>/dev/null`** —— 它会把"fetch 失败"这个唯一线索吞掉，
+> **让失败伪装成结论**（见 [methodology ⑯](methodology.md)）。
