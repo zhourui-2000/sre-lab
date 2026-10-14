@@ -98,7 +98,7 @@ services:
     command:
       - 'run'
       - '/etc/alloy/config.alloy'
-      - '--server.http.listen-addr=127.0.0.1:12345'    # 目的：UI 与 metrics 同样收口
+      - '--server.http.listen-addr=0.0.0.0:12345'    # 目的：UI 与 metrics 同样收口
       - '--storage.path=/var/lib/alloy/data'
     volumes:
       - ./alloy-config.alloy:/etc/alloy/config.alloy:ro
