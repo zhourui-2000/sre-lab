@@ -12,6 +12,7 @@
 | 容器 crash loop，日志 `permission denied` | `docker inspect <c> --format '{{.Config.User}}'` + `ls -la <配置文件>` | 按**消费方身份**调权限；或见下节「密钥文件」 |
 | `docker compose up` 直接退出无提示 | `docker compose config` | 按报错修 YAML（注意 `test` 数组里的数字要加引号） |
 | Ansible 报模块错误 / ping 失败 | `ansible lab -m ping -vvv`，看 `module_stderr` | 确认 inventory 用 `/usr/bin/python3.11` |
+| **`ansible` 不报错但完全没生效**（`ignoring it as an ansible.cfg source` / `Could not match supplied host pattern`） | `find /root/sre-lab -perm -o+w \| wc -l` | `chmod -R go-w /root/sre-lab`（见下节「控制端迁移后」） |
 | 推送后服务器没变 | `tail -3 /var/log/sre-relay.log` + `git log --oneline -1` | 钩子失败不回滚，需手工重推 |
 | **还原/回滚了但没生效** | `git log --oneline -4` 看那条 Revert 提交的标题对不对 | 用显式 SHA 重来，见下节「回滚操作」 |
 | `git push` 挂起无输出 | `ssh -T git@github.com` | 切手机热点，或 `git push relay main` |
@@ -91,6 +92,33 @@ git push relay main
 ```
 
 还原后仍要按「改了被挂载的配置文件」走一遍 `--force-recreate`，并**验生效值**。
+
+## 控制端迁移 / 重建后的固定动作
+
+> 跨文件系统拷贝（Windows 侧解包 → `/mnt/c` → WSL）**不保留 Unix 权限位**，
+> 整棵树回落 `0777`；而 Ansible **拒绝从全局可写目录读取 `ansible.cfg`** ——
+> inventory 与 `roles_path` 全部失效，**不报错、只降级**（见 [methodology ⑭](methodology.md)）。
+
+```sh
+# ① 权限收敛（判据：应为 0）
+find /root/sre-lab -perm -o+w | wc -l
+chmod -R go-w /root/sre-lab
+find /root/sre-lab -perm -o+w | wc -l        # 期望 0
+
+# ② 确认配置真的被读取（不是"文件存在"就算数）
+ansible --version | grep 'config file'       # 必须指向本仓库的 ansible.cfg
+
+# ③ 连通
+cd /root/sre-lab/ansible && ansible lab -m ping
+
+# ④ 工具链版本（控制端 Python 决定 ansible-core 上限）
+ansible --version | head -1
+```
+
+> ⚠️ **`--syntax-check` 通过不算通过验收** —— 它不依赖 inventory，
+> 在"配置完全没被加载"的状态下同样会打印 `playbook: site.yml`。
+> 同批迁移还会把 `/root/.gitconfig`、`/root/.ssh/*` 一起带成 0777，顺手收敛：
+> `chmod 644 /root/.gitconfig && chmod 600 /root/.ssh/*`。
 
 ## 推送后必做（relay 链）
 

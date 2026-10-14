@@ -158,6 +158,30 @@
 - 同族：①（打生效值，不看文件内容）、⑫（判据从消费方视角取）——
   都属于「**别对着代理指标下手**」。
 
+## ⑭ 迁移 / 拷贝不保留权限语义；而工具可能把权限当安全前提，然后静默降级
+
+- 来源：2026-10-14，控制端迁移后 `ansible lab -m ping` **不报错、也不生效**。三条 WARNING 说穿了全部真相：
+  `ignoring it as an ansible.cfg source` / `No inventory was parsed` / `Could not match supplied host pattern, ignoring: lab`。
+- 机制：文件经 `/mnt/c`（DrvFs / NTFS）中转进入 WSL，**这一路没有 `tar -p` 式的权限保留**，
+  整棵树按挂载默认值落盘 = `0777`（实测 135 目录 + 150 文件，连 `.git/objects/` 都是）。
+  而 Ansible 的设计是：**从全局可写目录加载 `ansible.cfg`，等于把 `roles_path` 交给任何能写该目录的人**
+  → 它宁可**不读配置**。这是**正确的**安全设计，不是 bug。
+- **最危险的部分是"没有报错"**：
+  - `exit code = 0`；
+  - `--syntax-check` 照样通过（它不依赖 inventory）；
+  - `ansible-playbook site.yml` 以 `skipping: no hosts matched` 优雅结束。
+  复盘时极易读成"跑完了，没事" —— 这是**安静的成功**。
+- 做法：
+  - 迁移 / 解包 / 跨文件系统拷贝之后，**权限必须显式重建**：
+    `find <dir> -perm -o+w | wc -l` 应为 0，不对就 `chmod -R go-w <dir>`；
+  - 别假设拷贝工具保留了权限位 —— `zip`、无 `-p` 的 `cp`、DrvFs 都不保留。
+- 推论：**「没报错」不是验收判据。** 与 ① 同族但层次不同 ——
+  ① 是「文件内容 ≠ 生效值」，本条是「**配置根本没被加载**」。
+  验收一律打生效值：`ansible --version` 的 `config file` 指向、`ping` 的 `pong`、实跑的 `changed=N`。
+- 附带（工具链版本同理）：`ansible-core` 也随控制端重建而漂移，
+  **控制端 Python 版本决定能装的 ansible-core 上限**（≥2.18 要求 Python ≥3.11）——
+  重建后必须重新确认，不能照抄旧记录。
+
 ---
 
 ## 历史脉络

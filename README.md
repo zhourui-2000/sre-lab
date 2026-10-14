@@ -11,7 +11,11 @@
 ## 环境
 
 - 云主机：Alibaba Cloud Linux 3.2104（2核2G / 40G）
-- 控制端：WSL2 Ubuntu + Ansible
+- 控制端：WSL2 Ubuntu 22.04.1 + Ansible（`ansible-core 2.17.14`，Python 3.10.6）
+  > ⚠️ 版本会漂移：**ansible-core ≥2.18 要求控制端 Python ≥3.11**，Ubuntu 22.04 自带的 3.10 装不了。
+  > 重建控制端后须重新确认版本，并**先做权限收敛** —— 跨文件系统拷贝会留下 `0777`，
+  > Ansible 会因此**静默忽略** `ansible.cfg`
+  > （见 [incidents/2026-10-14](docs/incidents/2026-10-14-migration-perms-ansible-cfg.md)）。
 - 容器运行时：Docker（overlay2 + 日志轮转）
 
 ## 架构
@@ -44,11 +48,16 @@ docs/          基线、方法论、runbook、故障复盘、ADR
 ## 一键复现
 
 ```bash
+# 控制端若为新迁移 / 重建的，先做权限收敛与配置读取确认（见 docs/runbook.md）
+find /root/sre-lab -perm -o+w | wc -l   # 期望 0；非 0 则 chmod -R go-w /root/sre-lab
+ansible --version | grep 'config file'  # 必须指向本仓库的 ansible.cfg，否则配置根本没被加载
+
 cd ansible
 ansible lab -m ping              # 测试连通
 ansible-playbook site.yml        # 应用主机配置
  > 例外：observability/alertmanager.yml 含 SMTP 授权码，不入库；
- > 新环境需 cp alertmanager.yml.example alertmanager.yml 后填入授权码（600 权限）。
+ > 新环境需 cp alertmanager.yml.example alertmanager.yml 后填入授权码。
+ > 文件权限必须是 644（容器以 nobody 运行，写 600 会 crash loop —— 见 docs/adr/0002）。
 ```
 
 幂等验证：连续执行两次，第二次 `changed=0`。

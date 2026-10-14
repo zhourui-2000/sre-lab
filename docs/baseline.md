@@ -43,9 +43,15 @@
   保护来自**目录不可穿越**，可读性来自 644。见 [ADR 0002](adr/0002-secret-file-permissions.md)。
 - **改了被挂载的配置文件，必须 `docker compose up -d --force-recreate <svc>`**。
   普通 `up -d` 只比较服务定义、不比较挂载内容，**是 no-op**（见 [methodology ⑪](methodology.md)）。
+- **控制端仓库不得有 group/other 可写位**（`find /root/sre-lab -perm -o+w` 应为 0）。
+  跨文件系统拷贝不保留权限、会回落 `0777`，而 Ansible 会因此**静默忽略** `ansible.cfg` ——
+  不报错、只降级（见 [methodology ⑭](methodology.md)）。
 
 ## 四、环境前提
 
+- **控制端工具链**：`ansible-core 2.17.14` + Python 3.10.6（Ubuntu 22.04.1 的可用最高线）。
+  ⚠️ 原控制端为 `ansible-core 2.20.1` / Python 3.14；**ansible-core ≥2.18 要求控制端 Python ≥3.11**，
+  在 3.10 上装不了。控制端重建后**必须重新确认**，不能照抄旧记录。
 - **SELinux = Disabled**（阿里云镜像预设，`semanage` 已装）。sshd 监听 2222 无需端口标签。
   ⚠️ 若重建于默认 Enforcing 的环境（官方 ISO 安装的标准发行版），sshd 绑定 2222 会 bind 失败导致无法远程登录；
   需 `semanage port -a -t ssh_port_t -p tcp 2222`。
@@ -101,3 +107,4 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 | 09-26 | 控制端重建连锁故障 | 环境漂移 + 缺生效性验证（5 个根因） | [→](incidents/2026-09-26-control-node-rebuild.md) |
 | 10-09 | ALERTS 恒空、告警静默 | 缺 `--remoteWrite.url` + alertmanager 未定义 | [→](incidents/2026-10-09-alert-chain-silent.md) |
 | 10-09 | 通知渠道再三踩坑 | `up -d` no-op / `smtp_from` 拼错 / 属主 / `chmod 600` | [→](incidents/2026-10-09-alert-chain-silent.md#第二阶段接通通知渠道) |
+| 10-14 | 控制端迁移后 Ansible 静默失效 | 权限回落 `0777`，Ansible 拒读全局可写目录下的配置 | [→](incidents/2026-10-14-migration-perms-ansible-cfg.md) |
