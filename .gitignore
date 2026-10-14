@@ -28,3 +28,7 @@ observability/alloy-data/
 # 含 SMTP 授权码，不入库
 observability/alertmanager.yml
 observability/alertmanager-data/
+
+# Python 字节码（scripts/ 下有 .py 工具）
+__pycache__/
+*.pyc

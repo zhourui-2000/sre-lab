@@ -61,6 +61,15 @@
   `./loki-data` 若由 Docker 自动创建会成为 root 属主，**Loki 起不来**。固定动作见 runbook。
   ⚠️ Loki 3.6+ 镜像**不含 shell**，排障判据是 `curl 127.0.0.1:3100/ready` 与 `docker logs loki`，
   不是 `docker exec loki sh`。
+- **防火墙持久配置必须等于 IaC 声明**（真源 = `ansible/roles/security/tasks/main.yml` 的 loop）。
+  核对命令：`python3 scripts/check-fw-drift.py`。
+  ⚠️ 该角色是**增量式**的（只 `--add-*`，**从不删除**）—— 服务器上手加的规则 playbook 既不会撤销、
+  也不会报错，漂移会静默存活到重建那天（2026-10-14 实测：`trusted` 区多出 `192.168.0.0/16`，
+  来自 09-16 的手工命令，游离 28 天未被发现）。
+- **k3s 的 Pod / Service 网段 `10.42.0.0/16` / `10.43.0.0/16` 必须在 trusted 区，且由 IaC 管理**。
+  ⚠️ **`6443/tcp` 刻意不对外开放**：单节点没有外部节点需要访问 apiserver，
+  k3s 官方文档的 `--add-port=6443/tcp` 是给多节点集群的，照抄等于在公网开一个 API 端点。
+  收口靠 firewalld + 云安全组，并实测外部不可达。
 
 ## 四、环境前提
 
