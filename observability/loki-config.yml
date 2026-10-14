@@ -1,0 +1,54 @@
+# Loki 配置 —— 单进程（monolithic）模式 + 文件系统存储
+#
+# 设计取舍（单机 2C2G / 40G 的场景）：
+#   - 存储用 Filesystem：对象存储（S3/MinIO）只在「多实例共享索引 / 超出单机磁盘 /
+#     跨区复制」时才划算，单机引入它只是增加复杂度与延迟
+#   - schema v13 + tsdb：Loki 3.x 的标准组合；boltdb-shipper 已废弃，别照抄旧教程
+#   - retention **显式**设 7 天：默认值是 0s = 永久保留，在 40G 盘上不能不管
+#   - reporting 关掉：学习环境，没必要让 Loki 出网做匿名统计
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  log_level: warn            # 目的：Loki 自己的日志别把 journald 的 500M 限额刷满
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    # ⚠️ from 一旦生效就不要再改（改了会导致旧索引无法读取）
+    - from: 2026-10-14
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 168h             # 7 天
+  allow_structured_metadata: true    # v13 下的默认行为，显式写出便于阅读
+  max_query_series: 500
+  # 目的：单机 2G 内存下给查询设上限，避免一条大范围查询把容器打到 mem_limit
+  max_query_parallelism: 8
+
+compactor:
+  working_directory: /loki/compactor
+  # ⚠️ 关键：只写 limits_config.retention_period 是**不会删数据**的，
+  #    真正执行删除的是 Compactor。少了下面这行，日志会一直堆到磁盘满。
+  retention_enabled: true
+  delete_request_store: filesystem
+
+analytics:
+  reporting_enabled: false

@@ -1,0 +1,15 @@
+# Grafana 数据源（provisioned）—— Loki（日志）
+#
+# 目的：让「集中日志」在 Grafana 里可直接查询（Explore / LogQL）。
+# 与 prometheus 数据源一样全部代码化，容器重建后自动恢复。
+apiVersion: 1
+
+datasources:
+  - name: loki
+    uid: loki                    # 固定 uid，便于面板/链接引用
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false              # 单一真源：只认本文件
+    jsonData:
+      maxLines: 1000             # 目的：单次查询返回行数上限，防止把 Loki 打到内存上限

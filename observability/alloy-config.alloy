@@ -1,0 +1,80 @@
+// Grafana Alloy 配置 —— 日志采集端
+//
+// 为什么是 Alloy 而不是 promtail：
+//   promtail 于 2025-02-13 进入 LTS、**2026-03-02 到达 EOL**（商业支持终止、
+//   不再有安全补丁与缺陷修复），并在 Loki 3.7.3 中从仓库移除。
+//   Alloy 是 Grafana 官方指定的继任者（Grafana Agent 也于 2025-11-01 EOL，
+//   两条线统一收敛到 Alloy）。决策全文见 docs/adr/0004。
+//
+// 采集两类来源：systemd journal（系统日志）+ Docker 容器日志
+//
+// ⚠️ 权限取舍（已知并接受）：下面挂了 /var/run/docker.sock —— 这等于把宿主 root 的
+//    等效能力给了容器，安全性上并不便宜。之所以仍然这么选：
+//      - docker.sock 是拿到「容器名 / compose service / 标签」这类元数据的唯一实用途径；
+//        改读 /var/lib/docker/containers/*/*-json.log 虽然不需要 socket，
+//        但必须自己 parse JSON 并从路径反推容器身份，元数据会明显变糙。
+//      - 该 socket 已挂为 :ro，且 Alloy 只做只读发现；
+//      - 本机是学习环境，防护层次见 docs/baseline.md「二、安全」。
+//    若将来要收紧，方向是改用 file_match + loki.source.file 走日志文件，放弃富元数据。
+
+// ── 来源 1：systemd journal ────────────────────────────────────────────
+loki.relabel "journal" {
+  forward_to = []                    // 仅作为规则集被引用，不直接转发
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    // 目的：把数值优先级翻成可读 level，便于 {level="err"} 直接筛
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "system" {
+  path          = "/var/log/journal"
+  // 目的：首次启动不要回溯几个月的陈年日志刷爆后端
+  max_age       = "12h"
+  labels        = { job = "systemd-journal", host = constants.hostname }
+  relabel_rules = loki.relabel.journal.rules
+  forward_to    = [loki.write.local.receiver]
+}
+
+// ── 来源 2：Docker 容器日志 ────────────────────────────────────────────
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+loki.relabel "docker" {
+  forward_to = []
+
+  rule {
+    // 容器名带前导 "/"，去掉
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    // 目的：用 compose 的 service 名当标签，比容器名稳定
+    //（容器名可能带随机后缀，是典型的"高基数陷阱"）
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  labels        = { job = "docker", host = constants.hostname }
+  relabel_rules = loki.relabel.docker.rules
+  forward_to    = [loki.write.local.receiver]
+}
+
+// ── 写入 Loki ─────────────────────────────────────────────────────────
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = { agent = "alloy" }
+}

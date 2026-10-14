@@ -75,3 +75,39 @@ services:
       - "127.0.0.1:9093:9093"
     mem_limit: 64m
     restart: unless-stopped
+
+  loki:
+    image: grafana/loki:${LOKI_VER}
+    container_name: loki
+    command:
+      - '-config.file=/etc/loki/loki-config.yml'
+    volumes:
+      - ./loki-config.yml:/etc/loki/loki-config.yml:ro
+      # ⚠️ 镜像以 uid 10001 运行（非 root）→ 宿主目录必须先 chown 10001，
+      #    否则启动即 permission denied。固定动作见 docs/runbook.md
+      - ./loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"           # 目的：收口，不暴露 0.0.0.0
+    mem_limit: 192m
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:${ALLOY_VER}
+    container_name: alloy
+    command:
+      - 'run'
+      - '/etc/alloy/config.alloy'
+      - '--server.http.listen-addr=127.0.0.1:12345'    # 目的：UI 与 metrics 同样收口
+      - '--storage.path=/var/lib/alloy/data'
+    volumes:
+      - ./alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - ./alloy-data:/var/lib/alloy/data
+      - /var/log/journal:/var/log/journal:ro            # 目的：读 systemd journal
+      - /etc/machine-id:/etc/machine-id:ro              # 目的：缺它 journal 源读不到内容
+      - /var/run/docker.sock:/var/run/docker.sock:ro    # 目的：容器发现与元数据；权限取舍见 alloy-config.alloy 注释
+    ports:
+      - "127.0.0.1:12345:12345"
+    mem_limit: 192m
+    restart: unless-stopped
+    depends_on:
+      - loki

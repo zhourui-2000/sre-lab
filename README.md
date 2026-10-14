@@ -34,6 +34,7 @@ Internet
 可观测栈（全部收口 127.0.0.1）
   node-exporter:9100 ──► VictoriaMetrics:8428 ──► Grafana:3000
                                  └─► vmalert:8880 ──► alertmanager:9093 ──► 邮件
+  journald + docker logs ──► Alloy ──► Loki:3100 ──► Grafana:3000
 ```
 
 ## 目录说明
@@ -92,7 +93,8 @@ ansible-playbook site.yml        # 应用主机配置
 - [x] Week 2  可观测栈
    - [x] 指标 —— node-exporter → VictoriaMetrics → Grafana
    - [x] 告警 —— 4 条规则端到端验证（检测 / 落库 / 送达 / 通知四环）+ 邮件通知
-   - [ ] 日志 —— 集中日志（Loki）未做；当前仅 journald 500M 限额 + docker 日志轮转
+   - [ ] 日志 —— **Loki 3.7.8 + Alloy 采集端已入 IaC，待部署验证**
+        （此前仅 journald 500M 限额 + docker 日志轮转；采集端因 promtail EOL 改用 Alloy，见 ADR 0004）
 - [ ] Week 3-4  k3s + GitOps 交付链路
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证

@@ -52,6 +52,12 @@
 - **站点备份脚本与定时任务必须在 IaC 内**（`ansible/roles/web/`）。
   `/usr/local/bin/site-backup.sh` 与 `/etc/cron.d/site-backup` 此前游离在 Ansible 之外，
   **重建机器即丢**。
+- **日志链路 = Loki（存储）+ Alloy（采集）**，两者版本由 `observability/.env` 固定。
+  ⚠️ **不得回退到 promtail** —— 它已于 2026-03-02 EOL（见 [ADR 0004](adr/0004-promtail-eol-alloy.md)）。
+- **Loki 数据目录属主必须是 10001**（镜像以 uid 10001 运行）。
+  `./loki-data` 若由 Docker 自动创建会成为 root 属主，**Loki 起不来**。固定动作见 runbook。
+  ⚠️ Loki 3.6+ 镜像**不含 shell**，排障判据是 `curl 127.0.0.1:3100/ready` 与 `docker logs loki`，
+  不是 `docker exec loki sh`。
 
 ## 四、环境前提
 
@@ -95,6 +101,10 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 容器 6 个合计约 **250 MiB**。**Loki + promtail 按 160 MB 预算 → 1161 − 160 ≈ 1000 MB**，
 上 k3s 后余量约 **250 MB**（比 10-09 测算的 462 MB 紧）。
 实测数据与 Loki 可行性论证见 [`capacity.md`](capacity.md)。
+
+**2026-10-14 日志层**（Loki 3.7.8 + Alloy v1.20.1，采集端因 promtail EOL 而改用 Alloy）：
+`mem_limit` 上限 **384 MB**（loki 192m + alloy 192m），镜像合计 866 MB → 磁盘 **27%**。
+⚠️ **实际占用待实测**；公布实测值之前不据此定 k3s 结论。详见 [`capacity.md`](capacity.md)。
 
 ## 六、待补基线
 

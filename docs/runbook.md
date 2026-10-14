@@ -29,6 +29,11 @@
 | 收到告警但没人被通知 | 三点同验 + 查收件箱，见 [`methodology ⑦`](methodology.md) | 查 `docker logs alertmanager \| grep -i smtp` |
 | 容器恒 unhealthy | `docker inspect <c> --format '{{json .State.Health}}'` | healthcheck 别用 `localhost`，改 `127.0.0.1` |
 | **Grafana 数据源/面板不见了** | `docker exec grafana ls /etc/grafana/provisioning/datasources/` | 确认 compose 挂了 `./grafana/provisioning` 与 `./grafana/dashboards`，再 `up -d --force-recreate grafana` |
+| **Loki 起不来 / `permission denied`** | `docker logs loki --tail 20` | 宿主目录属主错：`install -d -o 10001 -g 10001 /opt/sre-lab/observability/loki-data && docker compose up -d --force-recreate loki` |
+| **Loki 没就绪** | `curl -s 127.0.0.1:3100/ready`（返回 `ready` 才算好） | 看 `docker logs loki`；⚠️ 3.6+ 镜像**无 shell**，`docker exec loki sh` 一定失败，别浪费时间 |
+| **容器日志没进 Loki** | `curl -s 127.0.0.1:12345/metrics \| grep loki_write_sent` | 确认 alloy 挂了 `docker.sock`；看 `docker logs alloy` |
+| **journald 日志没进 Loki** | 同上一行 | 确认挂了 `/etc/machine-id`（缺它 journal 源读不到内容）与 `/var/log/journal` |
+| **日志查不动 / Loki 内存打满** | `docker stats --no-stream loki` | 收紧 `limits_config.max_query_series` / `max_query_parallelism`，或缩短 `retention_period` |
 | 镜像拉不下来 | `docker pull <img>` 看卡在哪一步 | 加前缀 `docker.m.daocloud.io/...` 再 `docker tag` |
 
 ## 改了被挂载的配置文件（★ 最容易踩）
