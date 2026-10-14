@@ -54,6 +54,9 @@
   **重建机器即丢**。
 - **日志链路 = Loki（存储）+ Alloy（采集）**，两者版本由 `observability/.env` 固定。
   ⚠️ **不得回退到 promtail** —— 它已于 2026-03-02 EOL（见 [ADR 0004](adr/0004-promtail-eol-alloy.md)）。
+- **容器内监听地址与宿主侧绑定是两回事**：需要被宿主访问的服务，**容器内必须绑 `0.0.0.0`**，
+  收口靠宿主侧写 `127.0.0.1::`。
+  ⚠️ 容器内绑 `127.0.0.1` 会让端口映射失效（2026-10-14 实测：Alloy 因此 `/metrics` 返回 **HTTP 000**）。
 - **Loki 数据目录属主必须是 10001**（镜像以 uid 10001 运行）。
   `./loki-data` 若由 Docker 自动创建会成为 root 属主，**Loki 起不来**。固定动作见 runbook。
   ⚠️ Loki 3.6+ 镜像**不含 shell**，排障判据是 `curl 127.0.0.1:3100/ready` 与 `docker logs loki`，
@@ -102,9 +105,11 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 上 k3s 后余量约 **250 MB**（比 10-09 测算的 462 MB 紧）。
 实测数据与 Loki 可行性论证见 [`capacity.md`](capacity.md)。
 
-**2026-10-14 日志层**（Loki 3.7.8 + Alloy v1.20.1，采集端因 promtail EOL 而改用 Alloy）：
-`mem_limit` 上限 **384 MB**（loki 192m + alloy 192m），镜像合计 866 MB → 磁盘 **27%**。
-⚠️ **实际占用待实测**；公布实测值之前不据此定 k3s 结论。详见 [`capacity.md`](capacity.md)。
+**2026-10-14 日志层实测**（Loki 3.7.8 + Alloy v1.20.1，采集端因 promtail EOL 而改用 Alloy）：
+8 个容器实测合计 **440 MiB**，其中日志层 **218.5 MiB**（loki 143.5 + alloy 75.0）；
+**available 1161 → 1020 MB**。**k3s 判据：1020 − 750 ≈ 270 MB 余量 → 可以上 k3s。**
+⚠️ 结构性隐患：8 个容器 `mem_limit` 之和 **1216 MB > available 1020 MB**（见 [`capacity.md`](capacity.md)）。
+镜像合计 866 MB → 磁盘 **27%**；loki-data 实测 605.5 KB / 48 min ≈ 18 MB/日。
 
 ## 六、待补基线
 
