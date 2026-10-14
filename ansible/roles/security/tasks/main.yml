@@ -19,6 +19,8 @@
     - { kind: service, zone: public,  value: 'http' }
     - { kind: service, zone: public,  value: 'https' }
     - { kind: source,  zone: trusted, value: '172.16.0.0/12' }
+    - { kind: source,  zone: trusted, value: '10.42.0.0/16' }   # k3s Pod 网段
+    - { kind: source,  zone: trusted, value: '10.43.0.0/16' }   # k3s Service 网段     
   register: fw_query
   changed_when: false
   failed_when: false      # 目的：rc=1 是「尚未放行」，不是执行失败
