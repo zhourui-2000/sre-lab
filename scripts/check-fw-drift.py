@@ -6,6 +6,9 @@
     python3 scripts/check-fw-drift.py [ssh别名]              # 默认 lab-node
     SRE_LAB_REPO=/root/sre-lab python3 check-fw-drift.py     # 指定仓库根（测试用）
 
+环境要求：Python ≥ 3.6、PyYAML，且当前机器能 ssh 到目标机（即控制端）。
+          在目标机上运行会在 ssh 那步失败 —— 会给出明确提示而不是 traceback。
+
 判据（不需要维护任何白名单）：
     出厂态  /usr/lib/firewalld/zones/*.xml   RPM 出厂定义；本地改动不写这个目录
     当前态  /etc/firewalld/zones/*.xml       firewalld 只在本地有改动时才生成
@@ -45,11 +48,17 @@ done
 
 
 def ssh(host, script):
+    # 用 stdout/stderr=PIPE + universal_newlines，而不是 capture_output / text ——
+    # 后两者是 Python 3.7+ 才有的参数。2026-10-14 实测：在服务器自带的 Python 3.6.8 上
+    # 直接 TypeError 崩溃（信息完全不可读）。保持 3.6 兼容后，在错误的机器上运行
+    # 会走到下面那个明确的 ssh 失败提示，而不是一串 traceback。
     proc = subprocess.run(["ssh"] + SSH_OPTS + [host, script],
-                          capture_output=True, text=True)
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          universal_newlines=True)
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout).strip()
         print("❌ ssh %s 失败（rc=%d）：%s" % (host, proc.returncode, msg))
+        print("   本工具应在【控制端】运行（需要能 ssh 到目标机）。")
         sys.exit(2)
     return proc.stdout
 
@@ -59,7 +68,8 @@ def parse_declared(path):
     try:
         import yaml
     except ImportError:
-        print("❌ 控制端缺少 PyYAML（ansible-core 的依赖），无法解析 IaC 声明。")
+        print("❌ 当前 Python 无法 import yaml（解析 IaC 声明需要 PyYAML）。")
+        print("   控制端装了 ansible-core 就会带上它；目标机的 python3.11 没有。")
         sys.exit(2)
     if not os.path.isfile(path):
         print("❌ 找不到 %s" % path)
