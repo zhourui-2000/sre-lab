@@ -28,6 +28,7 @@
 | 规则 firing 但 alertmanager 收不到 | `docker logs vmalert --tail 40 \| grep -i notifier` | 确认 alertmanager 服务存在、`--notifier.url` 可达 |
 | 收到告警但没人被通知 | 三点同验 + 查收件箱，见 [`methodology ⑦`](methodology.md) | 查 `docker logs alertmanager \| grep -i smtp` |
 | 容器恒 unhealthy | `docker inspect <c> --format '{{json .State.Health}}'` | healthcheck 别用 `localhost`，改 `127.0.0.1` |
+| **Grafana 数据源/面板不见了** | `docker exec grafana ls /etc/grafana/provisioning/datasources/` | 确认 compose 挂了 `./grafana/provisioning` 与 `./grafana/dashboards`，再 `up -d --force-recreate grafana` |
 | 镜像拉不下来 | `docker pull <img>` 看卡在哪一步 | 加前缀 `docker.m.daocloud.io/...` 再 `docker tag` |
 
 ## 改了被挂载的配置文件（★ 最容易踩）

@@ -46,6 +46,12 @@
 - **控制端仓库不得有 group/other 可写位**（`find /root/sre-lab -perm -o+w` 应为 0）。
   跨文件系统拷贝不保留权限、会回落 `0777`，而 Ansible 会因此**静默忽略** `ansible.cfg` ——
   不报错、只降级（见 [methodology ⑭](methodology.md)）。
+- **Grafana 数据源与面板必须 provisioned**（代码在 `observability/grafana/`）。
+  不接受"只存在 `grafana.db` 里"的状态 —— 删容器即丢，且无法 code review。
+  迁移时 `name` / `uid` 必须沿用原值，否则既有面板的 `ds_prometheus` 变量解析不到数据源。
+- **站点备份脚本与定时任务必须在 IaC 内**（`ansible/roles/web/`）。
+  `/usr/local/bin/site-backup.sh` 与 `/etc/cron.d/site-backup` 此前游离在 Ansible 之外，
+  **重建机器即丢**。
 
 ## 四、环境前提
 
@@ -85,9 +91,17 @@
 **k3s 决策**：以 10-09 为准，1212 − 750 ≈ 462MB 余量 → 仍可行，但安装时须禁用内置
 traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需再做一次峰值复测。）
 
+**2026-10-14 复测（Phase D 收口）**：可用内存 **1161 MB**、磁盘 **25%**（9.2G / 40G，可用 29G）、
+容器 6 个合计约 **250 MiB**。**Loki + promtail 按 160 MB 预算 → 1161 − 160 ≈ 1000 MB**，
+上 k3s 后余量约 **250 MB**（比 10-09 测算的 462 MB 紧）。
+实测数据与 Loki 可行性论证见 [`capacity.md`](capacity.md)。
+
 ## 六、待补基线
 
 - 手工部署一次耗时（停服 → 替换 → 启动 → 验证，掐表）
+- **blackbox-exporter（外部可用性拨测）**：暂缓至 Week 5-6（SLO 阶段）。
+  理由与被否方案见 [ADR 0003](adr/0003-blackbox-exporter-deferred.md) ——
+  **引入时必须与消费它的告警规则同批提交**，否则当天就是新的死变量。
 - 可观测栈**满负载**峰值内存（10-09 复测为空载数据，不足以定配额）
 - GitOps 部署耗时（第 4 周）
 - 各类故障 MTTR、RTO/RPO（第 7 周）

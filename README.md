@@ -42,6 +42,7 @@ Internet
 ansible/       主机配置即代码（base：swap/sysctl/journald/docker；security：sshd/fail2ban/firewalld）
 nginx/         业务站点（容器化，配置与静态资源）
 observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager / 告警规则）
+               └─ grafana/  数据源与面板**代码化**（provisioning，容器重建后自动恢复）
 docs/          基线、方法论、runbook、故障复盘、ADR
 ```
 
@@ -91,7 +92,8 @@ ansible-playbook site.yml        # 应用主机配置
 - [x] Week 2  可观测栈
    - [x] 指标 —— node-exporter → VictoriaMetrics → Grafana
    - [x] 告警 —— 4 条规则端到端验证（检测 / 落库 / 送达 / 通知四环）+ 邮件通知
-   - [ ] 日志 —— 集中日志（Loki）未做；当前仅 journald 500M 限额 + docker 日志轮转- [ ] Week 3-4  k3s + GitOps 交付链路
+   - [ ] 日志 —— 集中日志（Loki）未做；当前仅 journald 500M 限额 + docker 日志轮转
+- [ ] Week 3-4  k3s + GitOps 交付链路
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证
 - [ ] Week 8  材料化

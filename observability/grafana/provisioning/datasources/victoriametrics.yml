@@ -1,0 +1,19 @@
+# Grafana 数据源（provisioned）
+#
+# 目的：把数据源从 grafana.db 里搬进版本控制 —— 此前删容器重建即丢，且无法 code review。
+# 迁移要点：name 与 uid **必须沿用原值**，否则既有面板（Node Exporter Full）
+#           的 `ds_prometheus` 变量会解析不到数据源。
+apiVersion: 1
+
+datasources:
+  - name: prometheus            # 沿用迁移前的名称
+    uid: afyf4zkpwnf28a         # 沿用迁移前的 uid
+    type: prometheus
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    editable: false             # 单一真源：只认本文件，禁止在 UI 改
+    jsonData:
+      httpMethod: POST          # 与迁移前实测值一致
+      prometheusType: Prometheus
+      timeInterval: 15s         # 与 scrape.yml 的 scrape_interval 对齐

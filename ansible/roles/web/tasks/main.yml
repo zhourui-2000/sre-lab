@@ -26,3 +26,22 @@
     content: |
       0 3 * * * root certbot renew --quiet --deploy-hook "docker exec web nginx -s reload" >> /var/log/certbot-renew.log 2>&1
     mode: '0644'
+
+- name: 确保站点备份目录存在
+  file:
+    path: /var/backups/site
+    state: directory
+    mode: '0755'
+
+- name: 部署站点备份脚本
+  copy:
+    src: site-backup.sh
+    dest: /usr/local/bin/site-backup.sh
+    mode: '0755'
+
+- name: 部署站点备份定时任务
+  copy:
+    dest: /etc/cron.d/site-backup
+    content: |
+      0 4 * * * root /usr/local/bin/site-backup.sh >> /var/log/site-backup.log 2>&1
+    mode: '0644'

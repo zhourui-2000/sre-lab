@@ -1,0 +1,18 @@
+# Grafana 面板 provider（provisioned）
+#
+# 目的：面板 JSON 从 grafana.db 搬进版本控制，容器重建后自动恢复。
+# 注意：allowUiUpdates=false 表示「仓库是唯一真源」——
+#       在 UI 里改面板不会落库生效，改完必须导出回仓库，否则下次重启即被覆盖。
+apiVersion: 1
+
+providers:
+  - name: sre-lab
+    orgId: 1
+    folder: ''                    # 放在 General 文件夹（与迁移前 folder_id=0 一致）
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30     # 文件变化后 30s 内自动重载（数据源仍需重启容器）
+    allowUiUpdates: false         # 单一真源
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
