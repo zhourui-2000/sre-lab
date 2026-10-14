@@ -17,6 +17,27 @@
 //      - 本机是学习环境，防护层次见 docs/baseline.md「二、安全」。
 //    若将来要收紧，方向是改用 file_match + loki.source.file 走日志文件，放弃富元数据。
 
+// ── 出口 1：先丢掉「陈旧条目」，再写给 Loki ──────────────────────────────
+//
+// 为什么需要这一层（2026-10-14 实测踩到）：
+//   Alloy 首次启动会**从容器日志文件的开头读起**。实测 web 容器的 json 日志整份都是
+//   2026-09-24 的内容（20 天前），grafana 的是 08:55 的启动日志。这些条目被 Loki 按
+//   两条机制拒收 —— reject_old_samples_max_age（默认 1w）判「too old」，
+//   max_chunk_age（1h）判「too far behind」。
+//   被拒的批次会持续重试 → Loki 日志里每 30~90 秒刷一批 error，真正有价值的新日志
+//   淹没在噪声里。**在客户端就丢掉，既不浪费带宽也不污染后端日志。**
+//
+// 阈值取 1h 的依据：与 Loki 生效配置里的 max_chunk_age 对齐（用 `/config` 端点读到的
+// 运行态，不是猜的）。journal 源原本 max_age=12h 也一并收到 1h，两个来源保持同一语义。
+loki.process "drop_stale" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.drop {
+    older_than          = "1h"
+    drop_counter_reason = "stale_on_first_read"
+  }
+}
+
 // ── 来源 1：systemd journal ────────────────────────────────────────────
 loki.relabel "journal" {
   forward_to = []                    // 仅作为规则集被引用，不直接转发
@@ -33,12 +54,13 @@ loki.relabel "journal" {
 }
 
 loki.source.journal "system" {
-  path          = "/var/log/journal"
-  // 目的：首次启动不要回溯几个月的陈年日志刷爆后端
-  max_age       = "12h"
+  path   = "/var/log/journal"
+  // 目的：不要回溯陈年日志。取 1h 是与 drop_stale 的阈值保持一致，
+  //       免得读出来又立刻被自己丢掉，白跑一遍。
+  max_age       = "1h"
   labels        = { job = "systemd-journal", host = constants.hostname }
   relabel_rules = loki.relabel.journal.rules
-  forward_to    = [loki.write.local.receiver]
+  forward_to    = [loki.process.drop_stale.receiver]
 }
 
 // ── 来源 2：Docker 容器日志 ────────────────────────────────────────────
@@ -68,10 +90,10 @@ loki.source.docker "containers" {
   targets       = discovery.docker.containers.targets
   labels        = { job = "docker", host = constants.hostname }
   relabel_rules = loki.relabel.docker.rules
-  forward_to    = [loki.write.local.receiver]
+  forward_to    = [loki.process.drop_stale.receiver]
 }
 
-// ── 写入 Loki ─────────────────────────────────────────────────────────
+// ── 出口 2：写入 Loki ─────────────────────────────────────────────────
 loki.write "local" {
   endpoint {
     url = "http://loki:3100/loki/api/v1/push"

@@ -94,6 +94,7 @@ services:
   alloy:
     image: grafana/alloy:${ALLOY_VER}
     container_name: alloy
+    hostname: zhourui2000
     command:
       - 'run'
       - '/etc/alloy/config.alloy'
