@@ -1,0 +1,37 @@
+---
+# ─────────────────────────────────────────────────────────────
+# k3s 的声明式配置（**不含安装本身** —— 安装见 k3s 落地手册 K2）
+#
+# 为什么这个角色必须"先于 k3s 安装"存在：
+#   k3s server 启动时会**自动读取** /etc/rancher/k3s/config.yaml 与 registries.yaml。
+#   把这两个文件交给 IaC，才能保证「重建机器 → 跑 playbook → 装 k3s」拿到的是同一份配置。
+#
+# ⚠️ 反过来做（先在服务器上手工写、以后再收进 IaC）会失去**可证明性**：
+#   playbook 查到文件已存在 → changed=0 → 无法证明 IaC 真能建出它。
+#   这与 2026-10-14 那次防火墙漂移是同一类问题（见
+#   docs/incidents/2026-10-14-firewall-drift-incremental-iac.md、methodology ⑮）。
+# ─────────────────────────────────────────────────────────────
+
+- name: 确保 /etc/rancher/k3s 目录存在
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: 部署 containerd 镜像加速配置（registries.yaml）
+  ansible.builtin.copy:
+    src: registries.yaml
+    dest: /etc/rancher/k3s/registries.yaml
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: 部署 k3s 服务端声明式配置（config.yaml）
+  ansible.builtin.copy:
+    src: config.yaml
+    dest: /etc/rancher/k3s/config.yaml
+    owner: root
+    group: root
+    mode: '0644'

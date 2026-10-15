@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────
+# k3s 服务端配置（声明式）
+# 理由：把关键取舍写进可 review 的文件，而不是藏在 systemd 参数里
+# ─────────────────────────────────────────────────────────────
+
+# 关闭内置组件 —— 2C2G 上的关键取舍，判据见 docs/capacity.md
+disable:
+  # 80/443 已被 web 容器（docker-proxy）占用，Traefik 会绑定失败并可能打挂站点
+  - traefik
+  # klipper servicelb 会抢占 80/443 的 hostPort，且单机不需要 LoadBalancer
+  - servicelb
+  # 省内存；本项目的指标已由 node-exporter + VictoriaMetrics 提供
+  - metrics-server
+
+# kubeconfig 默认是 0644（内含集群管理员证书），收紧到仅 root 可读
+# 依据：docs/adr/0002 的结论 —— 先确认谁要读它，再决定权限
+write-kubeconfig-mode: "0600"

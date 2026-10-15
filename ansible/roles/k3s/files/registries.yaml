@@ -1,0 +1,13 @@
+# k3s containerd 的镜像加速配置
+# 目的：docker 的 registry-mirrors 只作用于 docker，containerd 读的是本文件
+# 不配的后果：测试 Pod 拉 busybox 会超时（docker.io 直连被限）
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://docker.m.daocloud.io"
+  quay.io:
+    endpoint:
+      - "https://quay.m.daocloud.io"
+  ghcr.io:
+    endpoint:
+      - "https://ghcr.m.daocloud.io"
