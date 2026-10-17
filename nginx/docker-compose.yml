@@ -16,8 +16,10 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    mem_limit: 128m
-    memswap_limit: 256m
+    # 2026-10-17 校准：实测 4–5 MB（128m 是 25× 余量，形同虚设）；
+    # nginx 静态站，64m 已是 12×，失控时能真正保护邻居。
+    mem_limit: 64m
+    memswap_limit: 128m
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1/healthz"]
       interval: 30s

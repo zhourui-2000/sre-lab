@@ -45,7 +45,7 @@ nginx/         业务站点（容器化，配置与静态资源）
 observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager / 告警规则）
                └─ grafana/  数据源与面板**代码化**（provisioning，容器重建后自动恢复）
 docs/          基线、方法论、runbook、故障复盘、ADR
-scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明
+scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明；check-mem-budget.py 核对容器内存预算与撞限计数
 k8s/           Kubernetes 清单（声明式；smoke-test/ 为连通性与存储冒烟，后续由 GitOps 消费）
 ```
 
@@ -105,6 +105,8 @@ ansible-playbook site.yml        # 应用主机配置
          **前置：宿主从 cgroup v1 切到 v2** —— k8s v1.35+ 的 kubelet 硬前提，
          见 `docs/incidents/2026-10-15-cgroup-v1-blocks-kubelet.md`
          **控制面实测 ≈620–630 MiB**（`MemoryCurrent` + `kubepods.slice`），见 `docs/capacity.md`
+         **冒烟测试（K3.5）已完成**：`k8s/smoke-test/` 四份清单入库，`apply -f` 验通
+         镜像加速（直连 docker.io=000，只走 daocloud）/ DNS / 出网 / PV 供给 / 落盘 / 回收，零残留
    - [ ] GitOps —— ArgoCD 未开始
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证

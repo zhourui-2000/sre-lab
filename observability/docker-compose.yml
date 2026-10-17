@@ -12,7 +12,8 @@ services:
       - ./scrape.yml:/vmdata/scrape.yml:ro
     ports:
       - "127.0.0.1:8428:8428"
-    mem_limit: 256m
+    # 2026-10-17 校准：实测 55–58 MB（4.4× 余量太松，收紧到 3.3×）
+    mem_limit: 192m
     restart: unless-stopped
 
   node-exporter:
@@ -39,7 +40,8 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "127.0.0.1:3000:3000"
-    mem_limit: 256m
+    # 2026-10-17 校准：实测 82–99 MB（2.6× → 1.9×）
+    mem_limit: 192m
     restart: unless-stopped
 
   vmalert:
@@ -108,7 +110,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro    # 目的：容器发现与元数据；权限取舍见 alloy-config.alloy 注释
     ports:
       - "127.0.0.1:12345:12345"
-    mem_limit: 192m
+    # 2026-10-17 校准：实测 94–134 MB 且波动大；memory.events.max 累计 783 次
+    # （跨周期观测 Δ=0 → 是 10-15 启动回灌期的一次性事件，非持续限流）。
+    # 但 134/192 = 70% 余量过薄，放宽到 1.9×：这是本次唯一「加」而不是「减」的一项。
+    mem_limit: 256m
     restart: unless-stopped
     depends_on:
       - loki
