@@ -22,6 +22,14 @@ REPO="/opt/sre-lab"
 WORK="/root/argocd-install"
 NS="argocd"
 
+# ── 0. kubeconfig：helm 不会自己去找 k3s 的配置 ────────────────────
+# k3s 把 kubeconfig 写在 /etc/rancher/k3s/k3s.yaml（不在 ~/.kube/config），
+# 而 helm 找不到配置时**不报"没有配置"，而是退回默认地址 localhost:8080**，
+# 于是报出极具误导性的 "Kubernetes cluster unreachable: dial tcp [::1]:8080"。
+# 这里显式指定，避免依赖"某个 shell 里恰好 export 过"。
+# 注：不创建 ~/.kube/config —— 那是服务器上的手工产物，会变成 IaC 之外的漂移。
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+
 mkdir -p "${WORK}"
 cd "${WORK}"
 
@@ -131,12 +139,39 @@ then
   exit 1
 fi
 
+# ── 3.5 集群连通性预检（把"连不上"的问题挡在安装之前）────────────────
+# 没有这一步，helm 会走到最后一步才报 "Kubernetes cluster unreachable"，
+# 而那时 chart 已下完、渲染已过，看起来像"装到一半失败"，其实是**一个前置条件没满足**。
+echo "==> 集群连通性预检"
+printf '   KUBECONFIG = %s\n' "${KUBECONFIG}"
+if [ ! -r "${KUBECONFIG}" ]; then
+  echo "❌ 读不到 kubeconfig：${KUBECONFIG}"
+  echo "   k3s 的 kubeconfig 通常在 /etc/rancher/k3s/k3s.yaml（mode 600，需 root）"
+  echo "   可显式传入：KUBECONFIG=/path/to/k3s.yaml bash $0"
+  exit 1
+fi
+if ! helm list -A >/dev/null 2>&1; then
+  echo "❌ helm 连不上集群（KUBECONFIG=${KUBECONFIG}）"
+  echo "   自查：KUBECONFIG=${KUBECONFIG} helm list -A       # 看具体报错"
+  echo "         k3s kubectl get nodes                        # 对照，它自带 kubeconfig"
+  echo "   常见原因：k3s 服务未运行 / 6443 被防火墙挡在**本机**之外 / kubeconfig 过期"
+  exit 1
+fi
+echo "   ✅ 集群可达（k3s 内已有 release：$(helm list -A -q 2>/dev/null | tr '\n' ' ')）"
+
 # ── 4. 安装/升级 ──────────────────────────────────────────────────
 echo "==> helm upgrade --install"
 helm upgrade --install argocd "argo-cd-${CHART_VER}.tgz" \
   -n "${NS}" --create-namespace \
   -f "${REPO}/k8s/argocd/values.yaml" \
-  --wait --timeout 12m
+  --wait --timeout 12m || {
+    echo
+    echo "❌ helm upgrade --install 失败。先看现状，别急着重跑："
+    echo "   k3s kubectl -n ${NS} get pods"
+    echo "   k3s kubectl -n ${NS} get events --sort-by=.lastTimestamp | tail -20"
+    echo "   （--wait 超时多半是某个 Pod 还在拉镜像，重跑会让 helm 从头再来，反而更慢）"
+    exit 1
+  }
 
 echo
 echo "==> 结果"
