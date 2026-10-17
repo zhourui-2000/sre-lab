@@ -35,14 +35,54 @@ if ! command -v helm >/dev/null 2>&1; then
 fi
 printf 'helm: '; helm version --short
 
-# ── 2. chart 包（带校验）──────────────────────────────────────────
-if [ ! -f "argo-cd-${CHART_VER}.tgz" ]; then
-  echo "==> 下载 chart ${CHART_VER}"
-  curl -sSL -o "argo-cd-${CHART_VER}.tgz" "${CHART_URL}"
+# ── 2. chart 包（多通道 + 校验）────────────────────────────────────
+# GitHub releases 从这台服务器是**间歇性**的：实测 3 次里 1 次 200（约 8 KB/s）、
+# 1 次 connection reset、1 次空回复。所以不能只试一个地址。
+# 因为 sha256 已钉死，**任何一个通道拿到的包都必须过校验才用** ——
+# 这才是能安心使用镜像/代理的前提。
+CHART_FILE="argo-cd-${CHART_VER}.tgz"
+SOURCES=(
+  "${CHART_URL}"                                        # 官方（有时可用）
+  "https://ghproxy.net/${CHART_URL}"                    # 代理 1（服务器侧实测 200）
+  "https://gh-proxy.com/${CHART_URL}"                   # 代理 2（服务器侧实测 200）
+)
+
+if [ -f "${CHART_FILE}" ] && [ "$(sha256sum "${CHART_FILE}" | cut -d' ' -f1)" = "${CHART_SHA256}" ]; then
+  echo "==> chart 已就位且校验通过，跳过下载"
+else
+  ok=0
+  for src in "${SOURCES[@]}"; do
+    echo "==> 尝试下载：$(echo "${src}" | sed 's#https://##;s#/https.*##')"
+    rm -f "${CHART_FILE}.part"
+    if curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 300 \
+         -o "${CHART_FILE}.part" "${src}"; then
+      got=$(sha256sum "${CHART_FILE}.part" | cut -d' ' -f1)
+      if [ "${got}" = "${CHART_SHA256}" ]; then
+        mv "${CHART_FILE}.part" "${CHART_FILE}"
+        echo "   ✅ 下载并校验通过"
+        ok=1
+        break
+      fi
+      echo "   ⚠️ 下载到了但校验不符（${got:0:16}…），换下一个通道"
+    else
+      echo "   ⚠️ 该通道失败（curl rc=$?），换下一个通道"
+    fi
+    rm -f "${CHART_FILE}.part"
+  done
+
+  if [ "${ok}" != "1" ]; then
+    echo
+    echo "❌ 三个通道都失败了。两个可行的手工办法："
+    echo "   ① 复用之前下好的包（若有）："
+    echo "        cp /tmp/${CHART_FILE} ${WORK}/ && sha256sum ${WORK}/${CHART_FILE}"
+    echo "   ② 从别的机器下载后 scp 到 ${WORK}/，再确认 sha256 = ${CHART_SHA256}"
+    echo "   放好之后重跑本脚本即可（会跳过下载，仍会校验）。"
+    exit 1
+  fi
 fi
 
 echo "==> 校验 sha256"
-ACTUAL=$(sha256sum "argo-cd-${CHART_VER}.tgz" | cut -d' ' -f1)
+ACTUAL=$(sha256sum "${CHART_FILE}" | cut -d' ' -f1)
 if [ "${ACTUAL}" != "${CHART_SHA256}" ]; then
   echo "❌ chart 校验失败"
   echo "   期望 ${CHART_SHA256}"
@@ -59,11 +99,34 @@ if ! helm template argocd "argo-cd-${CHART_VER}.tgz" -n "${NS}" \
   echo "❌ 渲染失败："; sed 's/^/   /' "${WORK}/render.err"
   exit 1
 fi
-# 判据：必须恰好 4 个常驻工作负载（3 Deployment + 1 StatefulSet），且没有 dex / notifications
-N_WORK=$(grep -cE '^kind: (Deployment|StatefulSet)$' "${WORK}/rendered.yaml" || true)
-N_DEX=$(grep -cE 'argocd-dex-server|argocd-notifications-controller' "${WORK}/rendered.yaml" || true)
-echo "   常驻工作负载 ${N_WORK} 个（期望 4）；dex/notifications 残留 ${N_DEX} 处（期望 0）"
-if [ "${N_WORK}" != "4" ] || [ "${N_DEX}" != "0" ]; then
+
+# 判据必须解析渲染产物，不能靠 grep —— 第一版就是这么错的（2026-10-17 现场）：
+#   · `grep -c '^kind: Deployment'` 把 replicas:0 的 Deployment 也算成常驻 → 误报"5 个"
+#   · `grep 'argocd-dex-server'` 命中的是 TLS Secret 名 `argocd-dex-server-tls` → 误报"3 处 dex"
+# 两个都是**假阳性**：会让正确的配置被拦下。假阴性（该拦没拦）更糟。
+if ! python3 - "${WORK}/rendered.yaml" <<'PY'
+import sys
+import yaml
+
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1], encoding='utf-8')) if d]
+wl = [d for d in docs if d['kind'] in ('Deployment', 'StatefulSet')]
+run = [d for d in wl if (d['spec'].get('replicas') or 0) > 0]
+off = sorted(d['metadata']['name'] for d in wl
+             if 'dex' in d['metadata']['name'] or 'notification' in d['metadata']['name'])
+
+print('   常驻工作负载 {} 个（期望 4）: {}'.format(
+    len(run), ', '.join(d['metadata']['name'] for d in run)))
+print('   被关掉的组件仍存在工作负载 {} 个（期望 0）{}'.format(len(off), off or ''))
+
+ok = (len(run) == 4 and not off)
+for d in run:
+    lim = (d['spec']['template']['spec']['containers'][0].get('resources') or {}).get('limits')
+    if not lim:
+        print('   ⚠️ {} 没有 limits（不满足"失控时不连累邻居"）'.format(d['metadata']['name']))
+        ok = False
+sys.exit(0 if ok else 1)
+PY
+then
   echo "❌ 渲染结果与预期不符，停手检查 values.yaml"
   exit 1
 fi
