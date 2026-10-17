@@ -97,8 +97,15 @@ ansible-playbook site.yml        # 应用主机配置
    - [x] 指标 —— node-exporter → VictoriaMetrics → Grafana
    - [x] 告警 —— 4 条规则端到端验证（检测 / 落库 / 送达 / 通知四环）+ 邮件通知
    - [x] 日志 —— **Loki 3.7.8 + Alloy v1.20.1**，两类来源（journald / docker）端到端验证通过
-        （采集端因 promtail EOL 改用 Alloy，见 ADR 0004；磁盘稳态 ~126 MB / 7 天）
+        （采集端因 promtail EOL 改用 Alloy，见 ADR 0004；37 小时实测磁盘约 **1.94 MB/日** → 7 天稳态约 **14 MB**）
 - [ ] Week 3-4  k3s + GitOps 交付链路
+   - [x] k3s —— **v1.37.1+k3s1 单节点**，2026-10-15 落地并稳定运行
+         （`disable: [traefik, servicelb, metrics-server]`；80/443 已被 web 容器的 docker-proxy 占用；
+          6443 由 firewalld 收口，已带对照组实测外部不可达）
+         **前置：宿主从 cgroup v1 切到 v2** —— k8s v1.35+ 的 kubelet 硬前提，
+         见 `docs/incidents/2026-10-15-cgroup-v1-blocks-kubelet.md`
+         **控制面实测 ≈620–630 MiB**（`MemoryCurrent` + `kubepods.slice`），见 `docs/capacity.md`
+   - [ ] GitOps —— ArgoCD 未开始
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证
 - [ ] Week 8  材料化

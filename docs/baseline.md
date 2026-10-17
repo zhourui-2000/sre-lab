@@ -78,6 +78,16 @@
   **不得使用 `origin/main` 等本地缓存引用**；验证命令**不得吞 stderr**（`2>/dev/null`）——
   那会让失败伪装成结论（2026-10-14 一天内三次踩到，见 [methodology ⑯](methodology.md)）。
 
+- **宿主必须是 cgroup v2**（判据：`stat -fc %T /sys/fs/cgroup` = `cgroup2fs`）。
+  ⚠️ **Kubernetes v1.35+ 的 kubelet 在 cgroup v1 主机上直接退出**（不是降级、不是警告），
+  k3s v1.37.1 同样强制。这条**比内存更硬**：内存不够可以换轻量发行版，
+  cgroup 版本不对，什么发行版都起不来（2026-10-15 实测：安装脚本 `exit=0`、`k3s --version` 正常，
+  但服务每 14 秒自杀一次，无限循环）。
+  开关在 `/boot/grub2/grubenv` 的 `kernelopts` 变量（BLS 条目只写 `options $kernelopts $tuned_params`），
+  用 `grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=1"` 修改，
+  并同步写 `/etc/default/grub` 防将来 `grub2-mkconfig` 重新生成时丢参数。
+  详见 [incidents/2026-10-15-cgroup-v1-blocks-kubelet.md](incidents/2026-10-15-cgroup-v1-blocks-kubelet.md)。
+
 ## 四、环境前提
 
 - **控制端工具链**：`ansible-core 2.17.14` + Python 3.10.6（Ubuntu 22.04.1 的可用最高线）。
@@ -92,6 +102,17 @@
 - **网络**：公司网络 → GitHub 链路间歇不可用；本机 → 服务器、服务器 → GitHub 均稳定。
   推送走服务器中转，见 [`adr/0001-server-relay-push.md`](adr/0001-server-relay-push.md)。
 - **出网端口**：阿里云封 **25**，`smtp.qq.com:465` / `:587` 均**可达**（发告警邮件已验证）。
+
+- **cgroup 版本 = v2**（2026-10-15 用 `systemd.unified_cgroup_hierarchy=1` + 重启切换）。
+  宿主内核 `5.10.134-19.8.al8`（Alibaba Cloud Linux 3，**出厂默认 cgroup v1**）、systemd 239。
+  ⚠️ **v2 下没有 `memory.swappiness` 这个 cgroup 文件**（v2 改用 `memory.swap.max`）——
+  这意味着 systemd 服务不再被强制 `swappiness=60` 覆盖全局的 `vm.swappiness=10`，
+  「保留 swap 并监测」的取舍终于和配置意图一致（cgroup v1 下该意图对**所有** systemd 服务无效）。
+  ⚠️ **v2 下 docker 的 `mem_limit` 只限内存**，swap 由独立的 `memory.swap.max` 管（默认不限）——
+  容器更容易用 swap：OOM 风险下降，换页延迟代价上升。
+  ⚠️ 5.10 内核的 tmpfs **不支持 `noswap` 选项**，kubelet 启动时打
+  `error mounting tmpfs with the noswap option. Assuming not supported` 后继续 ——
+  意味着 **kubelet 无法为 Pod 保证"不使用 swap"**。
 
 ## 五、可观测栈实测
 
@@ -125,9 +146,32 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 8 个容器实测合计 **440 MiB**，其中日志层 **218.5 MiB**（loki 143.5 + alloy 75.0）；
 **available 1161 → 1020 MB**。**k3s 判据：1020 − 750 ≈ 270 MB 余量 → 可以上 k3s。**
 ⚠️ 结构性隐患：8 个容器 `mem_limit` 之和 **1216 MB > available 1020 MB**（见 [`capacity.md`](capacity.md)）。
-镜像合计 866 MB → 磁盘 **27%**；loki-data 实测 605.5 KB / 48 min ≈ 18 MB/日。
+镜像合计 866 MB → 磁盘 **27%**。
+⚠️ **原记「loki-data 605.5 KB / 48 min ≈ 18 MB/日」已作废**：那个窗口含 Alloy 首启回灌 12h
+journal 积压，是**启动期突发**而非稳态。37 小时实测约 **1.94 MB/日**，详见 `capacity.md`。
 
-## 六、待补基线
+---
+
+## 六、k3s 实测（2026-10-17 · 稳定运行 36 小时后）
+
+| 指标 | 实测 |
+|---|---|
+| 版本 / 拓扑 | **k3s v1.37.1+k3s1**，单节点（`ROLES=control-plane`） |
+| 控制面 `MemoryCurrent` | **575.4 / 577.6 MiB**（两次采样） |
+| Pod 侧 `kubepods.slice` | **44.8 / 51.0 MiB** |
+| **合计** | **≈ 620–630 MiB** |
+| 系统 Pod | 3 个（`coredns` Running、`local-path-provisioner` Running、`helm-install-gateway-api-crd` Completed） |
+| CRD | **14 个全部 `Established=True`**（含 k3s v1.37 新增的 gateway-api 11 个） |
+| 磁盘 | `/var/lib/rancher` **727 MB**；`/` **30%** |
+| 启动后水位 | available **594–597 MB**、swap 已用 **203.5 MB** |
+
+⚠️ **口径提醒**：`systemctl show k3s -p MemoryCurrent` **不含 Pod** ——
+kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读 `MemoryCurrent` 会少算约 50 MiB。
+
+**750 MB 估算至此退役**：实测比它低约 16–17%，方向没错但偏保守。
+详见 [`capacity.md`](capacity.md)。
+
+## 七、待补基线
 
 - 手工部署一次耗时（停服 → 替换 → 启动 → 验证，掐表）
 - **blackbox-exporter（外部可用性拨测）**：暂缓至 Week 5-6（SLO 阶段）。
@@ -137,7 +181,7 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 - GitOps 部署耗时（第 4 周）
 - 各类故障 MTTR、RTO/RPO（第 7 周）
 
-## 七、故障索引
+## 八、故障索引
 
 | 日期 | 事件 | 根因一句话 | 详情 |
 |---|---|---|---|
@@ -155,3 +199,5 @@ traefik / servicelb / metrics-server。（当前仍接近空载，上 k3s 前需
 | 10-14 | 控制端迁移后 Ansible 静默失效 | 权限回落 `0777`，Ansible 拒读全局可写目录下的配置 | [→](incidents/2026-10-14-migration-perms-ansible-cfg.md) |
 | 10-14 | 防火墙持久配置漂移 28 天 | 增量式 IaC 只加不删；回填 IaC 时凭记忆漏了一条 | [→](incidents/2026-10-14-firewall-drift-incremental-iac.md) |
 | 10-14 | 可执行位未进版本控制 / GitHub 状态被误判 | 缓存与索引被当成事实；核验命令吞掉了 stderr | [→](incidents/2026-10-14-indirect-evidence-as-fact.md) |
+| 10-15 | k3s 装完却无限重启 | 宿主 cgroup v1，而 k8s v1.35+ 的 kubelet 直接拒绝在 v1 上启动 | [→](incidents/2026-10-15-cgroup-v1-blocks-kubelet.md) |
+| 10-15 | k3s 起来了但集群 0 Pod | 一个 CRD 停在 `Installing` —— 崩溃循环期间被写入的中间态 | [→](incidents/2026-10-15-crd-stuck-installing.md) |
