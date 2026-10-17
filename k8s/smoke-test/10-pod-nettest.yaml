@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────
+# 网络冒烟：一个「睡着」的 busybox，所有检查用 kubectl exec 跑
+#
+# 为什么不写成一次性命令（跑完就退出）：
+#   一次性 Pod 退出后要反复 create/delete 才能再测；睡着的话可以在
+#   同一个网络环境里连续做 DNS / Service / 出网三项检查，
+#   失败时还能进去手工复现。
+#
+# ★ 这个镜像能不能被拉下来，本身就是一条判据：
+#   实测服务器直连 registry-1.docker.io = http 000（不通），
+#   docker.io 的镜像只能走 /etc/rancher/k3s/registries.yaml 里的
+#   daocloud 镜像站。所以「Pod 起来了」= 镜像加速链路真的生效了。
+#   （k3s 内嵌的 4 个镜像不经过网络，不能用来证明这件事。）
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nettest
+  namespace: smoke-test
+  labels:
+    sre-lab/purpose: smoke-test
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: nettest
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 3600"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi

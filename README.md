@@ -46,6 +46,7 @@ observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager
                └─ grafana/  数据源与面板**代码化**（provisioning，容器重建后自动恢复）
 docs/          基线、方法论、runbook、故障复盘、ADR
 scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明
+k8s/           Kubernetes 清单（声明式；smoke-test/ 为连通性与存储冒烟，后续由 GitOps 消费）
 ```
 
 ## 一键复现

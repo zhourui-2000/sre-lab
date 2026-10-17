@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# 存储冒烟：把 PVC 挂进 Pod，写一个带时间戳的证明文件
+#
+# 判据分三层（只看第一层会被骗）：
+#   ① PVC 变 Bound —— 证明供给器认了；
+#   ② 容器内读得回来 —— 证明挂载真的生效、而且可写；
+#   ③ 宿主机 /var/lib/rancher/k3s/storage/ 下出现对应目录 ——
+#      证明数据真的落在磁盘上，而不是落在一个"看不见的中间层"。
+#
+# set -e 是有意的：写入失败就让容器退出（restartPolicy=Never → 直接 Error），
+# 比"悄悄失败然后 sleep"更容易被发现。
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-writer
+  namespace: smoke-test
+  labels:
+    sre-lab/purpose: smoke-test
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: writer
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "written at $(date -u +%Y-%m-%dT%H:%M:%SZ) by $(hostname)" > /data/proof.txt
+          echo "--- 写入完成，内容如下 ---"
+          cat /data/proof.txt
+          sleep 3600
+      volumeMounts:
+        - name: data
+          mountPath: /data
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: smoke-pvc

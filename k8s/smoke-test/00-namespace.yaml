@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────
+# K3.5 冒烟测试 · 独立命名空间
+#
+# 为什么用命名空间而不是直接放 default：
+#   ① 清理变成一条命令（kubectl delete ns），不会漏删残留对象；
+#   ② 与 Week 4 ArgoCD「一个应用一个命名空间」的组织方式一致 ——
+#      现在把这个习惯立起来，接 GitOps 时不需要重构目录。
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smoke-test
+  labels:
+    app.kubernetes.io/part-of: sre-lab
+    sre-lab/purpose: smoke-test

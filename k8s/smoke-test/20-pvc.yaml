@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────
+# 存储冒烟：PVC（动态供给）
+#
+# ★ 关键前提：local-path 的 volumeBindingMode = WaitForFirstConsumer
+#   意思是「有 Pod 引用它、调度器决定了落哪个节点，才开始绑定」。
+#   所以「PVC 一直 Pending」在还没建 Pod 之前是**正常现象**，不是故障。
+#   判断它有没有问题，必须等到 30-pod-storage.yaml 应用之后再查。
+#
+# 为什么显式写 storageClassName：虽然 local-path 带 (default) 标记，
+#   写出来是为了让"用哪个供给器"变成可读的声明，而不是靠集群默认值。
+# ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: smoke-pvc
+  namespace: smoke-test
+  labels:
+    sre-lab/purpose: smoke-test
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 128Mi
