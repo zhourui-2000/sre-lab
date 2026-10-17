@@ -4,6 +4,19 @@
 mirrors:
   docker.io:
     endpoint:
+      # ⚠️ 顺序即优先级：containerd 从上往下逐个尝试。
+      #
+      # 2026-10-17 实测（ArgoCD 安装现场）：
+      #   docker.m.daocloud.io 的 docker.io 端点出现**间歇 502**（连测 5 次：502/401/401/502/401）。
+      #   containerd 拉 redis:8.6.4-alpine 时，3 个 layer blob 全部命中 502，
+      #   连续退避重试 12 分钟仍未成功 → Pod ImagePullBackOff。
+      #   同一时段 quay.m.daocloud.io 正常（argocd 主镜像 222 MB 一次拉成），
+      #   说明是**该镜像端点**的问题，不是网络或配置。
+      #
+      # dockerproxy.net 实测可完整交付：redis 7 层计 32.9 MB，最大层 29 MB，
+      #   约 15 秒（≈1.9 MB/s），逐层校验长度一致。
+      # 因此把它放第一位；daocloud 留作兜底（它通常更快，恢复后可按需调回）。
+      - "https://dockerproxy.net"
       - "https://docker.m.daocloud.io"
   quay.io:
     endpoint:
