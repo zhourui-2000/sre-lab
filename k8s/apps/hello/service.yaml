@@ -1,0 +1,18 @@
+# Service：ClusterIP（不开 NodePort / LoadBalancer）
+# 理由同 ArgoCD 本身：项目不变量是「端口一律绑 127.0.0.1」，
+# 访问靠 kubectl port-forward，不在公网多开口。
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/part-of: sre-lab
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

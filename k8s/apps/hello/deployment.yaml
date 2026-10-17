@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────
+# GitOps 演示应用：hello
+#
+# 为什么需要它：ArgoCD 装完如果不管东西，它就是个空壳。
+# 这里用一个最小但真实的工作负载来证明 GitOps 的四条回路：
+#   ① 自动同步   —— commit 后 ArgoCD 自动把集群调到 Git 声明状态
+#   ② self-heal  —— 手工删 Pod，ArgoCD 自动重建（因为期望状态在 Git 里）
+#   ③ drift 检测 —— 手工改集群里的副本数，ArgoCD 报 OutOfSync
+#   ④ 回滚       —— revert commit，ArgoCD 自动把集群退回上一个状态
+#
+# 为什么用 nginx 而不是「站点」：站点静态资源还没打包成镜像
+#（现在靠 volume 挂载），搬进 k8s 需要先解决"镜像里带不带静态文件"的问题。
+# 那是独立的一次迁移，不该和「装 GitOps」混在一轮里。
+# ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/part-of: sre-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+    spec:
+      containers:
+        - name: hello
+          image: nginx:1.24-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            # 单机 2G，requests 决定能不能调度、limits 决定失控时连累谁
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 48Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5

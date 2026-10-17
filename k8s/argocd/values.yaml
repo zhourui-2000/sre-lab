@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────
+# ArgoCD 精简部署 values
+#   chart: argo-cd 10.10.5   appVersion: ArgoCD v3.5.5
+#   目标机型：2 vCPU / 2 GiB，宿主 available ≈ 594 MB
+#
+# 这份文件的每一行都能回答「为什么」：
+#   · 关掉什么 —— 三个组件都不服务于「演示 GitOps」，只在吃内存
+#   · 限多少   —— 按 ArgoCD v3 各组件实测常驻量给 1.5–2× 余量
+#   · 怎么访问 —— ClusterIP + kubectl port-forward，不在公网多开一个口
+# ─────────────────────────────────────────────────────────────────────
+
+global:
+  # 镜像钉在 appVersion 上。服务器实测可直连 quay.io（401 = 需要认证，不是不通），
+  # 因此不走 daocloud 镜像站 —— 少一层转发就少一个失败点。
+  image:
+    tag: v3.5.5
+
+# ── 关掉的三个组件 ──────────────────────────────────────────────────
+dex:
+  enabled: false          # 不用 SSO。本地 admin + 端口转发足够，省一个进程
+notifications:
+  enabled: false          # 告警已有 vmalert + alertmanager 那一套，不重复搭
+
+# ⚠️ applicationSet 在这版 chart（10.10.5）里**没有 enabled 开关**
+#    我第一版写了 `applicationSet.enabled: false`，helm 不报错、但**静默忽略** ——
+#    渲染出来仍然有 argocd-applicationset-controller。
+#    真正有效的关法是 replicas: 0（Deployment 存在、但不起 Pod，不占内存）。
+#    判据：`helm template` 后 grep 工作负载数量，而不是相信 values 写对了。
+applicationSet:
+  replicas: 0
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
+
+# ── 四个必需组件：一律单副本 + 显式 requests/limits ──────────────────
+# requests 决定调度能不能落地（节点 Allocatable 1.83 GiB），
+# limits  决定它失控时会不会连累 k3s 和 docker 那 8 个容器。
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 48Mi
+    limits:
+      cpu: 300m
+      memory: 160Mi
+
+server:
+  replicas: 1
+  service:
+    # 关键取舍：不开 NodePort / LoadBalancer。
+    # 项目不变量是「端口一律绑 127.0.0.1」，公网只留 80/443/2222；
+    # 访问方式用 `kubectl port-forward svc/argocd-server 8080:443`。
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 20m
+      memory: 48Mi
+    limits:
+      cpu: 200m
+      memory: 160Mi
+
+redis:
+  enabled: true
+  # ⚠️ chart 默认镜像在 ecr-public.aws.com/docker/library/redis
+  #    该域名实测**可达**（401 = 需要匿名 token，不是不通），但 ECR Public 的匿名
+  #    token 流程 containerd 不保证能自动走通。这里改成 docker.io ——
+  #    它是本项目**已经验证过**的路径（busybox:1.36 就是经 daocloud 镜像站拉下来的），
+  #    宁可走熟路，也不要在首次安装时赌一个没验证过的认证流程。
+  image:
+    repository: docker.io/library/redis
+    tag: 8.6.4-alpine
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 96Mi
+
+# redis-ha 默认就是 false，显式写出来是为了让「我们用的是单实例 redis」这件事可见
+redis-ha:
+  enabled: false

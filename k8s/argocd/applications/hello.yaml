@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────
+# 第一个 ArgoCD Application（也是 GitOps 回路的验证对象）
+#
+# 三个关键取舍：
+#   ① source.repoURL 用 **https 匿名**：仓库是公开的，不需要 deploy key。
+#      少一份凭据就少一处会过期、会泄漏的东西。
+#   ② destination.namespace 不写 default：单独一个 hello 命名空间，
+#      清理时删掉整个 ns 即可，不会和别的对象混在一起。
+#   ③ syncPolicy 显式打开 prune + selfHeal：
+#        - selfHeal：集群被手工改动后，ArgoCD 会自动改回去（这是"声明式"的实质）
+#        - prune   ：Git 里删掉的资源，集群里也会被删（否则会越积越多）
+#      注意 selfHeal 打开后，**手工 kubectl scale 会被自动改回来** ——
+#      这不是 bug，是 GitOps 的定义。演示 drift 时要先关自愈或看 OutOfSync 状态。
+# ─────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: sre-lab
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/zhourui-2000/sre-lab.git
+    targetRevision: main
+    path: k8s/apps/hello
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
