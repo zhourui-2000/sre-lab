@@ -50,11 +50,13 @@ services:
     command:
       - '--datasource.url=http://victoriametrics:8428'
       - '--rule=/rules/alert-rules.yml'
+      - '--rule=/rules/slo-rules.yml'   # 目的：SLO 规则独立成文件 —— 改它不动主机规则，反之亦然
       - '--notifier.url=http://alertmanager:9093'
       - '--httpListenAddr=:8880'         # 目的：必须显式给，否则管理 API 不可达
       - '--remoteWrite.url=http://victoriametrics:8428'   # 目的：缺它则 ALERTS 不落库，VM 永远查不到
     volumes:
       - ./alert-rules.yml:/rules/alert-rules.yml:ro
+      - ./slo-rules.yml:/rules/slo-rules.yml:ro
     ports:
       - "127.0.0.1:8880:8880"            # 目的：收口，别再重犯 0.0.0.0 的错
     mem_limit: 64m
@@ -117,3 +119,22 @@ services:
     restart: unless-stopped
     depends_on:
       - loki
+
+  # ── 外部可用性拨测（2026-10-19 · SLO 的 SLI 来源）──────────────
+  # 为什么不进 k3s：① 2G 机已到边界（ArgoCD 落地后 available 338MB / swap 550MB），
+  #   k8s 组件真实成本 ≈ Pod 占用的 3 倍；
+  # ② 探针跑在被测平台里，报错时分不清「站点坏了」和「k3s 坏了」。
+  # 决策全文见 docs/adr/0005-blackbox-on-docker-compose.md
+  blackbox:
+    image: quay.io/prometheus/blackbox-exporter:${BB_VER}
+    container_name: blackbox
+    command:
+      - '--config.file=/config/blackbox.yml'
+    volumes:
+      # 探针模块是配置不是状态：只读挂载，没有写权限的需求
+      - ./blackbox.yml:/config/blackbox.yml:ro
+    ports:
+      - "127.0.0.1:9115:9115"      # 目的：收口；VM 走 compose 网络直抓，不必经宿主
+    # 2026-10-19 初值：Go 程序空载约 20 MB，2× 余量。实测走 scripts/check-mem-budget.py
+    mem_limit: 48m
+    restart: unless-stopped

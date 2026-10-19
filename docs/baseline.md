@@ -102,6 +102,15 @@
   判据用 `scripts/check-endpoints.py`（7 个入口 × 第一跳 + 跟随终态），
   见 [incidents/2026-10-19-healthz-missing-on-canonical-https.md](incidents/2026-10-19-healthz-missing-on-canonical-https.md)。
 
+- **SLO 的 SLI 只允许一个探针目标**。多目标混算 → 烧钱率无法归因，
+  也回答不了「是哪条路径坏了」。其他入口另立 job（`blackbox_follow`），
+  只做存在性检查，**不参与**可用性数字。口径见 [`docs/slo.md`](slo.md)。
+- **「探针挂了」和「站点挂了」必须分开告警**。`avg_over_time` 会跳过空洞 →
+  探针一挂，SLI 就**停在最后一个值**（看起来还很好）。
+  **无数据既不是 0% 可用，也不是 100% 可用。**
+  兜底靠 `ProbePipelineDown`（`up{job=~"blackbox.*"}==0`）与 `SloNoData`（样本缺失），
+  这两条必须**不依赖 SLI 的分母**。
+
 ## 四、环境前提
 
 - **控制端工具链**：`ansible-core 2.17.14` + Python 3.10.6（Ubuntu 22.04.1 的可用最高线）。
@@ -227,9 +236,12 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
 ## 七、待补基线
 
 - 手工部署一次耗时（停服 → 替换 → 启动 → 验证，掐表）
-- **blackbox-exporter（外部可用性拨测）**：暂缓至 Week 5-6（SLO 阶段）。
-  理由与被否方案见 [ADR 0003](adr/0003-blackbox-exporter-deferred.md) ——
-  **引入时必须与消费它的告警规则同批提交**，否则当天就是新的死变量。
+- ~~**blackbox-exporter（外部可用性拨测）**~~ → **已完成（2026-10-19）**：
+  `v0.29.0` 作为 docker compose 服务落地（**不进 k3s**，理由见
+  [ADR 0005](adr/0005-blackbox-on-docker-compose.md)），与消费它的 7 条告警规则**同批**提交。
+  探针 **15s**；SLI 目标 `https://zhourui2000.online/healthz` 严格 200；
+  SLO **99.5% / 30 天**（错误预算 216 分钟）。口径、测量点偏差与未证事项见 [`slo.md`](slo.md)；
+  内存实测走 `scripts/check-mem-budget.py`。
 - 可观测栈**满负载**峰值内存（10-09 复测为空载数据，不足以定配额）
 - ~~GitOps 部署耗时（第 4 周）~~ → **已完成**：ArgoCD 首次安装到 4 Pod 就绪约 34 分钟
   （其中 **12 分钟是镜像拉取超时白等**，见事故记录）；首次同步 **12 秒**。详见 [`capacity.md`](capacity.md)。

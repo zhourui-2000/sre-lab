@@ -1,0 +1,43 @@
+# blackbox-exporter 探针模块（2026-10-19 · Week 5-6 SLO 前置）
+#
+# 为什么 module 按「期望结果」命名，而不是按域名/用途命名：
+#   同一个站点的不同入口，**正确**的结果本来就不同 ——
+#   裸域 https 是 200，www 是 301（纯跳转层）。若按域名分组，
+#   「期望值」就会散落到 scrape 配置里；按期望分组，规则可复用、可自解释。
+#
+# 为什么不校验证书（insecure_skip_verify: true）：
+#   这里回答的是「能不能访问到、返回对不对」。
+#   证书过期是**另一个维度**的故障：服务完全正常，只是浏览器会拦。
+#   混进同一个 probe_success 会互相掩盖 ——
+#     证书过期 → 被读成"站点挂了"（误报，惊动所有人）；
+#     反过来，DNS/端口挂了 → 证书告警一起响，没人分得清主因。
+#   → 证书单独用 probe_ssl_earliest_cert_expiry 告警（见 slo-rules.yml）。
+#     注意：skip_verify 只跳过**校验**，仍然会解析出叶子证书，
+#     所以该指标照样可用 —— 这是这套拆分成立的前提。
+#
+# 为什么 preferred_ip_protocol: ip4：
+#   服务器只有 IPv4 出口；显式钉死可以避免"IPv6 优先 → 超时 → 回退 IPv4"
+#   把 probe_duration 抬高，进而污染延迟类指标。
+modules:
+  # 严格 200，不跟随重定向 —— SLI 用这个（规范化入口 https://裸域/healthz）
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      valid_status_codes: [200]
+      follow_redirects: false
+      preferred_ip_protocol: ip4
+      tls_config:
+        insecure_skip_verify: true
+
+  # 跟随重定向，终态必须是 200 —— 给 www / http 入口用
+  # 为什么不能只判"第一跳是 301"：跳到哪儿、跳过去是不是 404，才是用户真正经历的
+  http_2xx_follow:
+    prober: http
+    timeout: 8s
+    http:
+      valid_status_codes: [200]
+      follow_redirects: true
+      preferred_ip_protocol: ip4
+      tls_config:
+        insecure_skip_verify: true

@@ -3,3 +3,44 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets: ['node-exporter:9100']
+
+  # ── 外部可用性拨测（2026-10-19 · SLO）───────────────────────────
+  # 为什么 SLI 只用一个 job：多目标混算 → 烧钱率无法归因，
+  # 也回答不了「是哪条路径坏了」。其他入口放到下面的 _follow job，
+  # 它们掉了我需要知道，但**不参与**可用性那个数字。
+  - job_name: blackbox
+    scrape_interval: 15s
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ['https://zhourui2000.online/healthz']
+        labels:
+          site: canonical
+    relabel_configs:
+      # 目标 URL 不能直接抓（它返回页面，不是指标）：
+      # 把真实目标塞进 ?target=，再把 __address__ 换成 blackbox 自己。
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: blackbox_follow
+    scrape_interval: 30s
+    metrics_path: /probe
+    params:
+      module: [http_2xx_follow]
+    static_configs:
+      - targets:
+          - 'https://www.zhourui2000.online/healthz'
+          - 'http://zhourui2000.online/healthz'
+          - 'https://zhourui2000.online/'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115

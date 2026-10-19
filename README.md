@@ -35,6 +35,7 @@ Internet
   node-exporter:9100 ──► VictoriaMetrics:8428 ──► Grafana:3000
                                  └─► vmalert:8880 ──► alertmanager:9093 ──► 邮件
   journald + docker logs ──► Alloy ──► Loki:3100 ──► Grafana:3000
+  blackbox:9115 ──► VictoriaMetrics:8428（外部可用性拨测 → SLO 的 SLI）
 ```
 
 ## 目录说明
@@ -42,10 +43,10 @@ Internet
 ```text
 ansible/       主机配置即代码（base：swap/sysctl/journald/docker；security：sshd/fail2ban/firewalld）
 nginx/         业务站点（容器化，配置与静态资源）
-observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager / 告警规则）
+observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager / blackbox / 告警规则）
                └─ grafana/  数据源与面板**代码化**（provisioning，容器重建后自动恢复）
 docs/          基线、方法论、runbook、故障复盘、ADR
-scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明；check-mem-budget.py 核对容器内存预算与撞限计数
+scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明；check-mem-budget.py 核对容器内存预算与撞限计数；slo-report.py 报当前 SLI / 错误预算 / 烧钱率
 k8s/           Kubernetes 清单（声明式；smoke-test/ 冒烟、apps/hello 为 GitOps 被管应用、argocd/ 为 ArgoCD 的 values 与 Application）
 ```
 

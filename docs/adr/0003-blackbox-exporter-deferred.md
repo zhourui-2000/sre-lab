@@ -1,7 +1,7 @@
 # ADR 0003：暂不部署 blackbox-exporter，先清除死变量
 
 - **日期**：2026-10-14
-- **状态**：已采纳
+- **状态**：已采纳（2026-10-19 解除暂缓 —— 落地与消费方同批提交，见 [ADR 0005](0005-blackbox-on-docker-compose.md)）
 - **相关**：[methodology ⑧](../methodology.md)（死变量会误导人以为功能已存在）
 
 ## 背景

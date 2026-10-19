@@ -1,0 +1,126 @@
+# SLO 记录与告警规则（2026-10-19 · Week 5-6）
+#
+# 口径（必须与 docs/slo.md 一致，改一处就要改另一处）：
+#   SLI  = 30 天内 probe_success 的平均值（= 成功探测占比）
+#   SLO  = 99.5%   → 错误预算 0.5% → 30 天可失败 **216 分钟**
+#                    （30 × 1440 × 0.5%；15s 探一次 ≈ 864 次失败探测）
+#   烧钱率 = 当前错误率 ÷ 0.005
+#           1× = 按此速率恰好在窗口内用完预算；14.4× = 1 小时烧掉 2%
+#
+# 为什么 interval 是 60s 而不是 30s：
+#   记录规则要在 30 天窗口上做 avg_over_time，每 30 秒重算一次纯属浪费。
+#   告警用 `for:` 做确认，比提高评估频率更有效（提高频率只会制造抖动）。
+#
+# 为什么用 avg_over_time 而不是 sum(rate(...))：
+#   probe_success 是 0/1 瞬时值，15s 采一次。"次数"本身没有业务含义，
+#   平均值直接就是"成功占比"，而且天然免疫采集频率调整。
+#
+# ⚠️ 已知盲区（这套规则最重要的注释）：
+#   **没有样本时，avg_over_time 会跳过空洞。**
+#   所以探针一挂，SLI 不会掉到 0%，而是**停在最后一个值**（看起来还是 99.9%）。
+#   这就是"无数据 ≠ 成功"的经典陷阱 —— 它不能靠改 SLO 公式解决，
+#   只能靠 ProbePipelineDown / SloNoData 这两条**独立于 SLI** 的告警兜住。
+#
+# ⚠️ 执行顺序：记录规则写在告警规则前面。vmalert 在**同一轮**不会拿刚算出的
+#   记录值去喂告警（告警是从 datasource 查的），所以 alert 实际读的是
+#   **上一轮**的记录值 → 有 1 个 cycle（≈60s）的延迟。对 SLO 这种慢变量无所谓，
+#   但不要用它做秒级判定。
+groups:
+  - name: slo-canonical
+    interval: 60s
+    rules:
+      # ── 记录规则：SLI 与错误预算 ────────────────────────────────
+      - record: slo:sli_ratio:30d
+        expr: 'avg_over_time(probe_success{job="blackbox"}[30d])'
+
+      - record: slo:error_ratio:30d
+        expr: '1 - slo:sli_ratio:30d'
+
+      - record: slo:error_budget_remaining:ratio
+        expr: '1 - slo:error_ratio:30d / 0.005'
+
+      # 把"剩余百分比"翻译成"还能坏多久"—— 分钟才是人能决策的单位
+      - record: slo:error_budget_remaining:minutes
+        expr: 'slo:error_budget_remaining:ratio * 216'
+
+      # ── 记录规则：多窗口烧钱率 ──────────────────────────────────
+      - record: slo:burn_rate:5m
+        expr: '(1 - avg_over_time(probe_success{job="blackbox"}[5m])) / 0.005'
+
+      - record: slo:burn_rate:30m
+        expr: '(1 - avg_over_time(probe_success{job="blackbox"}[30m])) / 0.005'
+
+      - record: slo:burn_rate:1h
+        expr: '(1 - avg_over_time(probe_success{job="blackbox"}[1h])) / 0.005'
+
+      - record: slo:burn_rate:6h
+        expr: '(1 - avg_over_time(probe_success{job="blackbox"}[6h])) / 0.005'
+
+      - record: slo:burn_rate:3d
+        expr: '(1 - avg_over_time(probe_success{job="blackbox"}[3d])) / 0.005'
+
+      # ── 告警：站点真的坏了 ──────────────────────────────────────
+      # 最直观的一条，也是最该被"烧钱率"取代的一条：
+      # 单点抖一下就叫醒人 = 报警疲劳 = 以后没人看。
+      - alert: SiteDown
+        expr: 'probe_success{job="blackbox"} == 0'
+        for: 3m
+        labels: { severity: critical, layer: sli }
+        annotations:
+          summary: "站点不可用：探针连续 3 分钟不是 200"
+          description: "{{ $labels.instance }} —— 此时 SLI 确实在掉，不是测量故障。"
+
+      # ── 告警：测量链路坏了（与上面是两件事）────────────────────
+      - alert: ProbePipelineDown
+        expr: 'up{job=~"blackbox.*"} == 0'
+        for: 3m
+        labels: { severity: warning, layer: probe }
+        annotations:
+          summary: "探针链路断了：VM 抓不到 blackbox"
+          description: "{{ $labels.instance }} —— 此刻 SLI 是**无数据**，不是 0% 可用，也不是 100% 可用。别据此判断站点好坏。"
+
+      - alert: SloNoData
+        expr: 'absent_over_time(probe_success{job="blackbox"}[15m])'
+        for: 1m
+        labels: { severity: warning, layer: probe }
+        annotations:
+          summary: "SLI 连续 15 分钟没有样本"
+          description: "up 可能仍是 1（blackbox 活着），但没产出 probe_success。此时 SLO 数字不可信，且预算计算会**冻结**在上一个值。"
+
+      # ── 告警：多窗口烧钱率（Google SRE Workbook 第 5 章）────────
+      # 每个告警都用"长窗口判严重程度 + 短窗口确认还在烧"，
+      # 短窗口的作用是**快速自愈**：问题解决了，报警会自动停，不用等人点已处理。
+      - alert: SloFastBurn
+        expr: '(slo:burn_rate:1h > 14.4) and (slo:burn_rate:5m > 14.4)'
+        for: 2m
+        labels: { severity: critical, layer: slo }
+        annotations:
+          summary: "SLO 快速燃烧：1 小时已烧掉 2% 错误预算"
+          description: "当前 1h 烧钱率 {{ $value }}×。按此速率，30 天预算将在约两天内耗尽 → 立即处理。"
+
+      - alert: SloMediumBurn
+        expr: '(slo:burn_rate:6h > 6) and (slo:burn_rate:30m > 6)'
+        for: 5m
+        labels: { severity: warning, layer: slo }
+        annotations:
+          summary: "SLO 中速燃烧：6 小时已烧掉 5% 错误预算"
+          description: "当前 6h 烧钱率 {{ $value }}×。按此速率 30 天预算约 5 天耗尽 → 本班次内处理。"
+
+      - alert: SloSlowBurn
+        expr: '(slo:burn_rate:3d > 1) and (slo:burn_rate:6h > 1)'
+        for: 30m
+        labels: { severity: info, layer: slo }
+        annotations:
+          summary: "SLO 慢速燃烧：3 天已烧掉 10% 错误预算"
+          description: "当前 3d 烧钱率 {{ $value }}×。不紧急，但按此速率本窗口会超支 → 排期处理。"
+
+      # ── 告警：证书（独立维度，不进 SLI）────────────────────────
+      # 21 天：Let's Encrypt 是 90 天有效期、自动续期在到期前 30 天开始尝试。
+      # 留 21 天 = 自动续期已经失败一周了，还有时间人工介入。
+      - alert: CertExpiringSoon
+        expr: 'probe_ssl_earliest_cert_expiry{job="blackbox"} - time() < 21 * 86400'
+        for: 1h
+        labels: { severity: warning, layer: tls }
+        annotations:
+          summary: "TLS 证书将在 21 天内过期"
+          description: "{{ $labels.instance }} 剩余 {{ $value }} 秒。检查 certbot 续期 cron 与 80 端口可达性。"
