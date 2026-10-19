@@ -269,3 +269,10 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
 | 10-15 | k3s 起来了但集群 0 Pod | 一个 CRD 停在 `Installing` —— 崩溃循环期间被写入的中间态 | [→](incidents/2026-10-15-crd-stuck-installing.md) |
 | 10-17 | ArgoCD 装上但 `redis` 一直 ImagePullBackOff | 镜像源的 docker.io 端点**间歇 502**；`/v2/` 探活正常**也不代表**能下 blob | [→](incidents/2026-10-17-registry-mirror-502.md) |
 | 10-19 | 健康检查在规范化 HTTPS 入口上 404 | 只验了 http 入口；www→裸域的 301 之后那个 server 块缺 `location = /healthz` | [→](incidents/2026-10-19-healthz-missing-on-canonical-https.md) |
+
+**2026-10-19 SLO 阶段实测**（第 9 个容器：`blackbox-exporter v0.29.0`，`mem_limit` 48 MB）：
+实测 **current 16–17 MB / anon 10–11 MB**（占 limit **22%**），撞限 0、`oom_kill` 0、swap 1 MB。
+整机口径：**available 338 MB、swap 435 MB**、9 容器 `current` 合计 **328 MB（anon 247 MB）**、
+根分区 **33%**。与 W4 收口（available 338 / swap 550）对比：**swap 反而降了 115 MB**。
+→ 加一个探针没有改变「2G 已到边界」的结论；探针成本与三段口径修正见
+[`capacity.md`](capacity.md)，决策见 [ADR 0005](adr/0005-blackbox-on-docker-compose.md)。
