@@ -30,6 +30,12 @@
 
 数据来源：VictoriaMetrics 的 /api/v1/query，经 ssh 隧道访问（端口从不对外开）。
 
+2026-10-19 v3 修正：**"15 分钟窗口里有洞"不等于"现在有洞"**。
+  探针重启 / 演练之后，`up` 一直在被写（值 0），而 `probe_success` 从恢复那一刻才重新开始 →
+  15 分钟窗口里必然存在一段缺口。拿它当失败，等于**每次重启都报一次警，而那个洞早就愈合了**。
+  → 判"现在是否在产出"用 **1 分钟** 窗口；15 分钟只作为信息展示（⚠️，不影响退出码）。
+  这与方法论 ⑰ 同源：窗口量是**过去**的统计，不能当作**当前**状态。
+
 退出码：0 健康；1 有风险（预算耗尽 / 快烧 / 链路断 / 无数据）；2 工具自身失效。
 """
 from __future__ import print_function
@@ -59,6 +65,8 @@ QUERIES = [
     ("up",      "探针 up（取最小）",        'min(up{job=~"blackbox.*"})',                           "num0"),
     ("samples", "近 15m 探针样本数",        'count_over_time(probe_success{job="blackbox"}[15m])',  "num0"),
     ("upsamp",  "近 15m up 样本数",         'count_over_time(up{job="blackbox"}[15m])',             "num0"),
+    ("p1m",     "近 1m 探针样本数",         'count_over_time(probe_success{job="blackbox"}[1m])',   "num0"),
+    ("u1m",     "近 1m up 样本数",          'count_over_time(up{job="blackbox"}[1m])',              "num0"),
     ("firing",  "正在 firing 的告警",       'count(ALERTS{alertstate="firing"}) or vector(0)',      "num0"),
 ]
 
@@ -171,8 +179,10 @@ def main():
         "burn6h":  "中烧阈值 6×（6 小时烧 5% 预算）",
         "burn3d":  "慢烧阈值 1×（3 天烧 10% 预算）",
         "up":      "0 = VM 抓不到探针（链路问题，不是站点问题）",
-        "samples": "应与下面 up 的样本数相同",
-        "upsamp":  "同一 job 另一条序列，用作「应有的样本数」基准",
+        "samples": "近 15m，只作趋势；判据看下面 1m",
+        "upsamp":  "近 15m 的基准序列（演练/重启后这里会先出现缺口）",
+        "p1m":     "★ 判据所在：15s 一跳，健康时 ≈4",
+        "u1m":     "★ 同期基准：与上面相等 = 现在没有洞",
         "firing":  "含主机的 4 条规则；0 才是常态",
     }
     for key, label, _expr, style in QUERIES:
@@ -197,14 +207,22 @@ def main():
     if data["up"] is None or data["up"] < 1:
         fails.append("探针链路断（up=%s）—— 此时 SLI 不可信" % fmt(data["up"], "num0"))
 
-    # ── 采样完整性（v2 判据：探针样本 vs up 样本，而不是拍一个 60）──
+    # ── 采样完整性（v3 判据：判"现在"，不判"过去 15 分钟"）──
+    # 为什么 15m 不能当判据：探针重启/演练后，up 仍在持续写样本（值为 0），
+    # 而 probe_success 从恢复时刻才重新开始 → 15m 窗口里**必然**有一段缺口。
+    # 拿它当失败 = 每次重启都报一次警，而那个洞早就愈合了。
     n_p, n_u = data["samples"], data["upsamp"]
-    if n_u is None or n_u == 0:
-        fails.append("近 15 分钟连 up 都没有样本 —— 采集完全停摆")
-    elif n_p is None:
-        fails.append("探针序列无样本（同期 up 有 %d 个）—— 探针挂了或过滤条件不对" % round(n_u))
-    elif n_p < n_u * 0.8:
-        fails.append("探针样本 %d 个，同期 up 有 %d 个 —— 采集有洞" % (round(n_p), round(n_u)))
+    p1, u1 = data["p1m"], data["u1m"]
+    if u1 is None or u1 == 0:
+        fails.append("最近 1 分钟连 up 都没有样本 —— 采集完全停摆")
+    elif p1 is None or p1 == 0:
+        fails.append("最近 1 分钟探针没有产出（up 有 %d 个）—— 探针挂了或 job 名不对" % round(u1))
+    elif p1 < u1 * 0.6:
+        fails.append("最近 1 分钟探针只有 %d 个样本、up 有 %d 个 —— 探针产出不完整"
+                     % (round(p1), round(u1)))
+    elif n_p is not None and n_u and n_p < n_u * 0.8:
+        warns.append("近 15m 探针 %d 个 / up %d 个 —— 窗口内有一段缺口（最近 1 分钟已恢复）"
+                     % (round(n_p), round(n_u)))
 
     # ── 烧钱率 ──
     if data["burn1h"] is not None and data["burn1h"] > 14.4:

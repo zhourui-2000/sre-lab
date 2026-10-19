@@ -21,6 +21,13 @@
     · 某容器的 `max` 计数**在观察窗口内仍在增长** —— 上限太紧，正在被限流
     · 容器实际合计逼近 `available` —— 真要换页了
 
+2026-10-19 修正：**不要用 memory.current 去比 MemAvailable**。
+  `current` 含 file cache（可回收），而 `MemAvailable` 本来就把可回收缓存算进去了 →
+  同一块缓存被数两遍，于是出现「容器合计 316 MB 已占 available 的 112%」这种没意义的提示。
+  真正该看的是 `memory.stat` 的 **anon**（不可回收的匿名内存）。当日实测：
+  current 322 MB / **anon 238 MB** / file 82 MB —— 差的 82 MB 就是那次误报的来源。
+  判据改为 anon 合计 > available × 90%。
+
 退出码：0 干净；1 有问题；2 工具自身失效（ssh 失败 / 取不到 cgroup）。
 """
 from __future__ import print_function
@@ -41,7 +48,10 @@ for c in $(docker ps --format '{{.Names}}' | sort); do
   swmax=$(cat "$s/memory.swap.max" 2>/dev/null || echo NA)
   hit=$(awk '/^max /{print $2}' "$s/memory.events" 2>/dev/null)
   oom=$(awk '/^oom_kill /{print $2}' "$s/memory.events" 2>/dev/null)
-  echo "C|$c|$lim|$cur|$sw|$swmax|${hit:-0}|${oom:-0}"
+  # anon = 不可回收部分（真占用）。memory.current 还含 file cache（可回收），
+  # 拿 current 去比 MemAvailable 会把同一块缓存算两遍 —— 见 docstring 2026-10-19 修正。
+  anon=$(awk '/^anon /{print $2}' "$s/memory.stat" 2>/dev/null)
+  echo "C|$c|$lim|$cur|$sw|$swmax|${hit:-0}|${oom:-0}|${anon:-0}"
 done
 free -m | awk '/^Mem:/{print "M|"$2"|"$7"|"$3}'
 free -m | awk '/^Swap:/{print "S|"$2"|"$3}'
@@ -70,7 +80,8 @@ def sample(host):
         if f[0] == "C":
             conts.append({"name": f[1], "lim": f[2], "cur": f[3],
                           "swap": f[4], "swmax": f[5],
-                          "hit": int(f[6] or 0), "oom": int(f[7] or 0)})
+                          "hit": int(f[6] or 0), "oom": int(f[7] or 0),
+                          "anon": f[8] if len(f) > 8 else "NA"})
         elif f[0] == "M":
             mem = {"total": int(f[1]), "avail": int(f[2]), "used": int(f[3])}
         elif f[0] == "S":
@@ -117,51 +128,65 @@ def main():
     print("容器内存预算核对 · %s · %s" % (host, time.strftime("%Y-%m-%d %H:%M:%S")))
     print("=" * 78)
     print()
-    print("  %-16s %8s %8s %8s %8s %8s %6s" %
-          ("容器", "上限MB", "当前MB", "swapMB", "撞限累计", "换出率", "OOM杀"))
-    print("  " + "-" * 74)
+    print("  %-16s %8s %8s %8s %8s %8s %8s %6s" %
+          ("容器", "上限MB", "当前MB", "anonMB", "swapMB", "撞限累计", "换出率", "OOM杀"))
+    print("  " + "-" * 82)
 
     sum_lim = 0.0
     sum_cur = 0.0
+    sum_anon = 0.0
     fails, warns = [], []
 
     for c in c1:
         lim = mb(c["lim"])
         cur = mb(c["cur"])
+        anon = mb(c["anon"])
         sw = mb(c["swap"])
         is_lim = isinstance(lim, float)
         if is_lim:
             sum_lim += lim
         if isinstance(cur, float):
             sum_cur += cur
+        if isinstance(anon, float):
+            sum_anon += anon
         ratio = (sw / lim * 100) if (is_lim and isinstance(sw, float) and lim > 0) else None
-        print("  %-16s %8s %8s %8s %8s %8s %6d" %
-              (c["name"], fmt(lim), fmt(cur), fmt(sw), c["hit"],
+        print("  %-16s %8s %8s %8s %8s %8s %8s %6d" %
+              (c["name"], fmt(lim), fmt(cur), fmt(anon), fmt(sw), c["hit"],
                ("%.0f%%" % ratio) if ratio is not None else "-", c["oom"]))
         if c["oom"] > 0:
             fails.append("%s 被 OOM 杀过 %d 次" % (c["name"], c["oom"]))
         if is_lim and isinstance(sw, float) and lim > 0 and sw > lim * 0.5:
             warns.append("%s 换出 %.0f MB（超过上限的 50%%）" % (c["name"], sw))
 
-    print("  " + "-" * 74)
-    print("  %-16s %8.0f %8.0f" % ("合计", sum_lim, sum_cur))
+    print("  " + "-" * 82)
+    print("  %-16s %8.0f %8.0f %8.0f" % ("合计", sum_lim, sum_cur, sum_anon))
     print()
     print("  物理：total %d MB · used %d MB · available %d MB" %
           (mem["total"], mem["used"], mem["avail"]))
     print("  swap：total %d MB · used %d MB" % (swap["total"], swap["used"]))
     print()
-    print("  ★ 判据说明：上限之和(%0.f) ÷ 实际合计(%0.f) = %.2f×" % (sum_lim, sum_cur,
+    print("  ★ 判据说明：上限之和(%0.f) ÷ 当前合计(%0.f) = %.2f×" % (sum_lim, sum_cur,
           (sum_lim / sum_cur) if sum_cur else 0))
     print("    —— 这个比值衡量「距离上限还有多少余量」。")
     print("       太小(<1.5×) → 正常波动就可能撞上限；太大(>6×) → 上限形同虚设，起不到保护邻居的作用。")
     print("    上限之和 **不是** 预算：它是每个容器「最多能拿多少」的封顶，不是预留。")
     print()
+    print("    anon = 不可回收的匿名内存（真占用）；当前MB = anon + file cache + kernel。")
+    print("    比 available 要看 **anon**：file cache 本来就可回收，拿 current 去比会把同一块缓存")
+    print("    算两遍，于是出现「容器合计 112% of available」这种没意义的提示（2026-10-19 修正）。")
+    print("    但注意：anon 只是**容器**的，available 是**整机**的 —— 两者不同口径，只用来对照，不做判定。")
+    print()
 
-    if mem["avail"] < mem["total"] * 0.15:
-        fails.append("available 只剩 %d MB（< 物理的 15%%）" % mem["avail"])
-    if sum_cur > mem["avail"] * 0.8:
-        warns.append("容器实际合计 %.0f MB 已占 available 的 %.0f%%" %
-                     (sum_cur, sum_cur / mem["avail"] * 100))
+    # available 的判据分层：单点低不等于故障。
+    # Linux 的 MemAvailable 已经把可回收缓存算进去了，分配时内核会回收 cache；
+    # 所以 250 MB available 在 1.87 GB 机器上是**常态**，不是故障。
+    # 真正会出事的是"低到分配失败"，那个阈值比"低"要低得多。
+    pct = mem["avail"] / float(mem["total"]) * 100 if mem["total"] else 100
+    if pct < 8:
+        fails.append("available 只剩 %d MB（物理的 %.0f%%）—— 已接近分配失败" % (mem["avail"], pct))
+    elif pct < 15:
+        warns.append("available %d MB（物理的 %.0f%%）—— 余量偏低；本机这是常态，判趋势不判单点"
+                     % (mem["avail"], pct))
     if swap["total"] > 0 and swap["used"] > swap["total"] * 0.5:
         warns.append("swap 已用 %d / %d MB（>50%%）" % (swap["used"], swap["total"]))
 
