@@ -100,24 +100,16 @@ ansible-playbook site.yml        # 应用主机配置
    - [x] 日志 —— **Loki 3.7.8 + Alloy v1.20.1**，两类来源（journald / docker）端到端验证通过
         （采集端因 promtail EOL 改用 Alloy，见 ADR 0004；37 小时实测磁盘约 **1.94 MB/日** → 7 天稳态约 **14 MB**）
 - [x] Week 3-4  k3s + GitOps 交付链路
-   - [x] k3s —— **v1.37.1+k3s1 单节点**，2026-10-15 落地并稳定运行
-         （`disable: [traefik, servicelb, metrics-server]`；80/443 已被 web 容器的 docker-proxy 占用；
-          6443 由 firewalld 收口，已带对照组实测外部不可达）
-         **前置：宿主从 cgroup v1 切到 v2** —— k8s v1.35+ 的 kubelet 硬前提，
-         见 `docs/incidents/2026-10-15-cgroup-v1-blocks-kubelet.md`
-         **控制面实测 ≈620–630 MiB**（`MemoryCurrent` + `kubepods.slice`），见 `docs/capacity.md`
-         **冒烟测试（K3.5）已完成**：`k8s/smoke-test/` 四份清单入库，`apply -f` 验通
-         镜像加速（直连 docker.io=000，只走 daocloud）/ DNS / 出网 / PV 供给 / 落盘 / 回收，零残留
-   - [x] GitOps —— **ArgoCD v3.5.5（Helm chart 10.10.5）精简部署**，2026-10-17 落地
-         （关 dex / notifications、`applicationSet.replicas: 0`；ClusterIP + 两层端口转发，**不开 NodePort**）
-         **闭环成立**：Application `hello` = `Synced / Healthy`，revision 与仓库 HEAD 一致
-         **已验两个回路**：`self-heal` 删 Pod 自动重建（≤36 秒）；`drift` 纠正
-         （`scale --replicas=3` → 数秒内 `OutOfSync` → 自动回到 1 副本）
-         **真实成本**：Pod 合计约 83 MiB，但 `available` 掉约 135 MB、swap 涨约 114 MB
-         → **≈ Pod 占用的 3 倍**（差额在 apiserver 的 watch cache），见 `docs/capacity.md`
-         **安装踩的两个坑**：`helm` 不继承 k3s 的 kubeconfig（退回 `localhost:8080`）；
-         daocloud 的 docker.io 端点间歇 502 → `registries.yaml` 改 `dockerproxy.net` 优先 +
-         daocloud 兜底，见 `docs/incidents/2026-10-17-registry-mirror-502.md`
-- [ ] Week 5-6  SLO 与告警治理
+   - [x] k3s —— **v1.37.1 单节点**（2026-10-15）；宿主先切 cgroup v2（v1.35+ 硬前提）；
+         控制面实测 **≈620–630 MiB**；K3.5 冒烟零残留（`k8s/smoke-test/`）
+   - [x] GitOps —— **ArgoCD v3.5.5 精简部署**（ClusterIP + 端口转发，不开 NodePort）；
+         `self-heal` ≤36s、`drift` 数秒纠正；真实成本 **≈ Pod 的 3 倍**
+   - 细节见 [`capacity.md`](docs/capacity.md)，事故见 [`incidents/`](docs/incidents/)
+- [x] Week 5-6  SLO 与告警治理
+   - [x] 探针 —— `blackbox-exporter v0.29.0`（docker compose，不进 k3s），4 目标 / 15s
+   - [x] SLO —— **99.5% / 30 天**，错误预算 **216 分钟**；多窗口烧钱率 14.4× / 6× / 1×
+   - [x] 演练 —— 停探针 13 分钟：`ProbePipelineDown` firing，恢复后自动 resolved；
+         **探针挂了 SLI 停在旧值**（无数据 ≠ 0 成功）
+   - 细节见 [`slo.md`](docs/slo.md)，决策见 [ADR 0005](docs/adr/0005-blackbox-on-docker-compose.md)
 - [ ] Week 7  韧性演练与灾备验证
 - [ ] Week 8  材料化
