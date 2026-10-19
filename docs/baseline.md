@@ -88,6 +88,12 @@
   并同步写 `/etc/default/grub` 防将来 `grub2-mkconfig` 重新生成时丢参数。
   详见 [incidents/2026-10-15-cgroup-v1-blocks-kubelet.md](incidents/2026-10-15-cgroup-v1-blocks-kubelet.md)。
 
+- **内存 / 组件成本以 cgroup 实测为准，`requests` / `limits` 之和不是成本**。
+  在 k8s 里尤其如此：组件的**大头往往在控制面**（apiserver 的 watch cache），不在它自己的 Pod 里。
+  2026-10-17 实测 ArgoCD：4 个 Pod 合计约 **83 MiB**，但 `available` 掉了约 **135 MB**、
+  swap 涨了约 **114 MB** —— **真实成本 ≈ Pod 占用的 3 倍**。
+  估算任何 k8s 组件一律按这个口径，详见 [`capacity.md`](capacity.md)。
+
 ## 四、环境前提
 
 - **控制端工具链**：`ansible-core 2.17.14` + Python 3.10.6（Ubuntu 22.04.1 的可用最高线）。
@@ -113,6 +119,21 @@
   ⚠️ 5.10 内核的 tmpfs **不支持 `noswap` 选项**，kubelet 启动时打
   `error mounting tmpfs with the noswap option. Assuming not supported` 后继续 ——
   意味着 **kubelet 无法为 Pod 保证"不使用 swap"**。
+
+- **`helm` 不会自动继承 k3s 的 kubeconfig**。k3s 写在 `/etc/rancher/k3s/k3s.yaml`
+  （`mode 600`，即 `write-kubeconfig-mode: "0600"` 的结果），`~/.kube/config` **不存在**。
+  `k3s kubectl` 自带配置所以能连；`helm` 走标准发现流程，**找不到就退回 `localhost:8080`**，
+  报出极具误导性的 `Kubernetes cluster unreachable: dial tcp [::1]:8080`。
+  → 脚本里显式 `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`；
+  **不在服务器上建 `~/.kube/config` 软链**（手工产物 = 漂移），
+  要开箱可用须把软链声明进 `ansible/roles/k3s/`（`file: state=link`）。
+- **外部 registry 依赖必须有兜底端点，且顺序即优先级**。`registries.yaml` 的 `endpoint`
+  是从上到下尝试的列表；只写一个 mirror，等于把整个集群的拉镜像能力绑在单一服务的可用性上。
+  2026-10-17：daocloud 的 docker.io 端点间歇 502 → `redis` 拉不到 → helm `--wait` 超时 12 分钟。
+  现为 `dockerproxy.net` 优先 + daocloud 兜底，见
+  [incidents/2026-10-17-registry-mirror-502.md](incidents/2026-10-17-registry-mirror-502.md)。
+  **改完必须 `systemctl restart k3s`** —— `registries.yaml` 只在启动时渲染成
+  `certs.d/<registry>/hosts.toml`，判据要落在渲染产物上，不是源文件。
 
 ## 五、可观测栈实测
 
@@ -152,7 +173,7 @@ journal 积压，是**启动期突发**而非稳态。37 小时实测约 **1.94 
 
 ---
 
-## 六、k3s 实测（2026-10-17 · 稳定运行 36 小时后）
+## 六、k3s 与集群组件实测（2026-10-17 · 稳定运行 36 小时后）
 
 | 指标 | 实测 |
 |---|---|
@@ -171,6 +192,30 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
 **750 MB 估算至此退役**：实测比它低约 16–17%，方向没错但偏保守。
 详见 [`capacity.md`](capacity.md)。
 
+### ArgoCD（GitOps）实测（2026-10-19 · 落地两天后）
+
+部署形态：k3s 内、命名空间 `argocd`、Helm chart `argo-cd` 10.10.5（ArgoCD v3.5.5）、
+关 dex / notifications、`applicationSet.replicas: 0`、ClusterIP + 两层端口转发（不开 NodePort）。
+
+| 判据 | 实测 |
+|---|---|
+| helm release | `REVISION 2 / deployed` |
+| 常驻 Pod | 4 个，全 `1/1 Running`（`applicationset-controller` 为 `0/0`，设计如此） |
+| Application `hello` | **Synced / Healthy**，revision 与仓库 HEAD 一致（`0abc9d2`） |
+| **self-heal** | 删 Pod → 新 Pod 在 **≤36 秒**内重建（ReplicaSet hash 不变、suffix 变化） |
+| **drift 纠正** | `scale --replicas=3` → 数秒内 `OutOfSync` → 自动 scale 回 1，事件可见 `Scaled down replica set from 3 to 1` |
+| `kubepods.slice` | `max=0`、`oom_kill=0`（两天） |
+| `argocd-server` 重启 2 次 | **liveness 探测超时 → SIGTERM → 优雅退出（exit 0）**，非 OOM、非崩溃 |
+
+**成本**（详见 [`capacity.md`](capacity.md)）：
+
+- Pod 合计约 **83 MiB**，但 `available` 掉约 **135 MB**、swap 涨约 **114 MB**
+  → **真实成本 ≈ Pod 占用的 3 倍**（差额在 apiserver 的 watch cache）
+- `application-controller` 是唯一持续长大的：27.7 → 80.6 → **126.2 MiB**（占 limit 49%）
+- 两天稳态 `available` **338 MB**、swap **550 MB**（414 → 550，是唯一持续恶化的指标）
+
+**结论：A 方案成立，但已到边界 —— 再加 k8s 侧组件前必须先升配 4G。**
+
 ## 七、待补基线
 
 - 手工部署一次耗时（停服 → 替换 → 启动 → 验证，掐表）
@@ -178,7 +223,8 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
   理由与被否方案见 [ADR 0003](adr/0003-blackbox-exporter-deferred.md) ——
   **引入时必须与消费它的告警规则同批提交**，否则当天就是新的死变量。
 - 可观测栈**满负载**峰值内存（10-09 复测为空载数据，不足以定配额）
-- GitOps 部署耗时（第 4 周）
+- ~~GitOps 部署耗时（第 4 周）~~ → **已完成**：ArgoCD 首次安装到 4 Pod 就绪约 34 分钟
+  （其中 **12 分钟是镜像拉取超时白等**，见事故记录）；首次同步 **12 秒**。详见 [`capacity.md`](capacity.md)。
 - 各类故障 MTTR、RTO/RPO（第 7 周）
 
 ## 八、故障索引
@@ -201,3 +247,4 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
 | 10-14 | 可执行位未进版本控制 / GitHub 状态被误判 | 缓存与索引被当成事实；核验命令吞掉了 stderr | [→](incidents/2026-10-14-indirect-evidence-as-fact.md) |
 | 10-15 | k3s 装完却无限重启 | 宿主 cgroup v1，而 k8s v1.35+ 的 kubelet 直接拒绝在 v1 上启动 | [→](incidents/2026-10-15-cgroup-v1-blocks-kubelet.md) |
 | 10-15 | k3s 起来了但集群 0 Pod | 一个 CRD 停在 `Installing` —— 崩溃循环期间被写入的中间态 | [→](incidents/2026-10-15-crd-stuck-installing.md) |
+| 10-17 | ArgoCD 装上但 `redis` 一直 ImagePullBackOff | 镜像源的 docker.io 端点**间歇 502**；`/v2/` 探活正常**也不代表**能下 blob | [→](incidents/2026-10-17-registry-mirror-502.md) |

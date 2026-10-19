@@ -346,3 +346,84 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，不是
 （净减仅 128 MB），而是先把现有 8 个服务的账做准。
 上 ArgoCD 之前需要单独决定：**精简部署（关 Dex、限 256m）还是升配到 4G**。
 
+## ArgoCD 落地实测（2026-10-17 ~ 10-19 · A 方案定论）
+
+上面那个决策选了 **A：精简部署**。以下是落地后的真实账。
+
+### 时间线：同一件事，四个时点四个答案
+
+| 时点 | `available` | swap 已用 | 当时在做什么 |
+|---|---|---|---|
+| 装前（10-17 11:15） | 594 MB | 157 MB | 8 个 docker 容器 |
+| 10-17 15:51 | **354 MB** | 307 MB | **正在拉镜像**，含临时占用 |
+| 10-17 16:22 | **459–478 MB** | 271–275 MB | 4 Pod 就绪、**无 Application**（空转） |
+| 10-17 16:37 | 354 MB | 414 MB | 有 Application 在 reconcile |
+| 10-19 09:00 | **338 MB** | **550 MB** | 两天稳态（含 self-heal / drift 演示） |
+
+⚠️ 装完测一次得到的数字，**既不一定是峰值，也不一定是稳态**。
+
+### Pod 级实测（cgroup v2，2026-10-19）
+
+| Pod | anon | limit | 利用率 |
+|---|---|---|---|
+| `argocd-application-controller` | **126.2 MiB** | 256 MiB | **49%** |
+| `argocd-server` | 27.9 MiB | 160 MiB | 17% |
+| `argocd-repo-server` | 26.3 MiB | 160 MiB | 16% |
+| `kube-system/coredns` | 15.3 MiB | 170 MiB | 9% |
+| `argocd-redis` | 4.3 MiB | 96 MiB | 4% |
+| `hello`（被管应用） | 2.1 MiB | 48 MiB | 4% |
+
+全部 Pod `memory.events.max = 0`、`oom_kill = 0` —— **没有任何一个撞过上限**。
+
+### ★ 核心结论：ArgoCD 的成本 ≠ 它 Pod 的占用
+
+| 项 | 数值 |
+|---|---|
+| 4 个 Pod 实测合计 | 约 **83 MiB**（10-17 装完时） |
+| `available` 却掉了 | 594 → 459 = **约 135 MB** |
+| swap 同时涨了 | 157 → 271 = **约 114 MB** |
+| 差额落在哪 | `k3s.service` anon 从约 520 涨到 675 MiB → **apiserver 的 watch cache** |
+
+ArgoCD 的 controller 会 **watch 全集群所有资源**。它自己的进程很小，
+但它让 **apiserver 缓存了更多对象**。
+
+→ **在 2G 机器上给一个 k8s 组件做内存估算，要按「Pod 占用的 3 倍」算，不能看 requests/limits。**
+
+### `application-controller` 会持续长大
+
+| 时点 | anon | 相对空转 |
+|---|---|---|
+| 10-17 16:22（无 Application） | 27.7 MiB | — |
+| 10-17 16:37（刚建 Application） | 80.6 MiB | **×2.9** |
+| 10-19 09:00（两天后） | **126.2 MiB** | **×4.6** |
+
+它缓存的是**目标状态 + manifests + 全集群对象**。**每多一个 Application，这个数字还会涨。**
+256 MiB 的 limit 在 1 个 Application 下够用，但**再加三四个就有撞限风险**。
+
+### 一次真实的重启（不是故障，但是信号）
+
+`argocd-server` 在 10-17 22:45 重启过 2 次。四条判据同时看，才能定性：
+
+| 判据 | 实测 | 排除什么 |
+|---|---|---|
+| `lastState.exitCode` | **0** | 不是崩溃（崩溃是 137/1） |
+| `lastState.reason` | **Completed** | 不是异常终止 |
+| `memory.events` | `oom=0`、`oom_kill=0` | **不是 OOM** |
+| 日志 | `Graceful shutdown of https initiated` → `All servers were gracefully shutdown. Exiting...` | 是收到 SIGTERM 后自己退的 |
+| 同期事件 | `Liveness probe failed: context deadline exceeded` | **是 liveness 探测超时被 kubelet 杀** |
+
+→ 根因是 2C2G 上响应变慢（swap 换页 + CPU 争抢），不是配置错误。
+**这是"A 方案能跑但余量薄"的直接证据** —— 功能没坏，但它已经贴着性能边界跑。
+
+### 结论
+
+**A 方案成立**：`available` 338 MB（阈值 100 MB）、`oom_kill=0`、站点与日志链路全程正常。
+
+**但不要再往上加组件了**：
+
+- `application-controller` 已占 limit 49%，且随 Application 数量增长
+- swap 两天涨了 **136 MB**（414 → 550）—— 唯一持续恶化的指标
+- 10-17 实测 apiserver 有 **109.8 MiB 被换出**：空闲时无害，**有真实 API 压力时会变慢**
+
+**下次要加任何 k8s 侧组件，先升配 4G**，而不是继续压现有服务。
+

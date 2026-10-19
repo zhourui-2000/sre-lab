@@ -46,7 +46,7 @@ observability/ 可观测栈（VictoriaMetrics / Grafana / vmalert / alertmanager
                └─ grafana/  数据源与面板**代码化**（provisioning，容器重建后自动恢复）
 docs/          基线、方法论、runbook、故障复盘、ADR
 scripts/       运维核对工具（只读）；check-fw-drift.py 检查服务器是否偏离 IaC 声明；check-mem-budget.py 核对容器内存预算与撞限计数
-k8s/           Kubernetes 清单（声明式；smoke-test/ 为连通性与存储冒烟，后续由 GitOps 消费）
+k8s/           Kubernetes 清单（声明式；smoke-test/ 冒烟、apps/hello 为 GitOps 被管应用、argocd/ 为 ArgoCD 的 values 与 Application）
 ```
 
 ## 一键复现
@@ -98,7 +98,7 @@ ansible-playbook site.yml        # 应用主机配置
    - [x] 告警 —— 4 条规则端到端验证（检测 / 落库 / 送达 / 通知四环）+ 邮件通知
    - [x] 日志 —— **Loki 3.7.8 + Alloy v1.20.1**，两类来源（journald / docker）端到端验证通过
         （采集端因 promtail EOL 改用 Alloy，见 ADR 0004；37 小时实测磁盘约 **1.94 MB/日** → 7 天稳态约 **14 MB**）
-- [ ] Week 3-4  k3s + GitOps 交付链路
+- [x] Week 3-4  k3s + GitOps 交付链路
    - [x] k3s —— **v1.37.1+k3s1 单节点**，2026-10-15 落地并稳定运行
          （`disable: [traefik, servicelb, metrics-server]`；80/443 已被 web 容器的 docker-proxy 占用；
           6443 由 firewalld 收口，已带对照组实测外部不可达）
@@ -107,7 +107,16 @@ ansible-playbook site.yml        # 应用主机配置
          **控制面实测 ≈620–630 MiB**（`MemoryCurrent` + `kubepods.slice`），见 `docs/capacity.md`
          **冒烟测试（K3.5）已完成**：`k8s/smoke-test/` 四份清单入库，`apply -f` 验通
          镜像加速（直连 docker.io=000，只走 daocloud）/ DNS / 出网 / PV 供给 / 落盘 / 回收，零残留
-   - [ ] GitOps —— ArgoCD 未开始
+   - [x] GitOps —— **ArgoCD v3.5.5（Helm chart 10.10.5）精简部署**，2026-10-17 落地
+         （关 dex / notifications、`applicationSet.replicas: 0`；ClusterIP + 两层端口转发，**不开 NodePort**）
+         **闭环成立**：Application `hello` = `Synced / Healthy`，revision 与仓库 HEAD 一致
+         **已验两个回路**：`self-heal` 删 Pod 自动重建（≤36 秒）；`drift` 纠正
+         （`scale --replicas=3` → 数秒内 `OutOfSync` → 自动回到 1 副本）
+         **真实成本**：Pod 合计约 83 MiB，但 `available` 掉约 135 MB、swap 涨约 114 MB
+         → **≈ Pod 占用的 3 倍**（差额在 apiserver 的 watch cache），见 `docs/capacity.md`
+         **安装踩的两个坑**：`helm` 不继承 k3s 的 kubeconfig（退回 `localhost:8080`）；
+         daocloud 的 docker.io 端点间歇 502 → `registries.yaml` 改 `dockerproxy.net` 优先 +
+         daocloud 兜底，见 `docs/incidents/2026-10-17-registry-mirror-502.md`
 - [ ] Week 5-6  SLO 与告警治理
 - [ ] Week 7  韧性演练与灾备验证
 - [ ] Week 8  材料化
