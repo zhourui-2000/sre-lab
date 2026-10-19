@@ -94,6 +94,14 @@
   swap 涨了约 **114 MB** —— **真实成本 ≈ Pod 占用的 3 倍**。
   估算任何 k8s 组件一律按这个口径，详见 [`capacity.md`](capacity.md)。
 
+- **一个服务有几个对外入口，就有几套判据；健康检查必须矩阵化验证**。
+  同一份 nginx 配置里，`:80` 与 `:443`、裸域与 www 的 location 集合**可以完全不同**。
+  2026-10-19 实测：`http://…/healthz` = 200，但规范化后的
+  `https://zhourui2000.online/healthz` = **404**（443 裸域块缺该 location）。
+  **单点通过会被读成"服务健康"，而真正的访问路径是坏的。**
+  判据用 `scripts/check-endpoints.py`（7 个入口 × 第一跳 + 跟随终态），
+  见 [incidents/2026-10-19-healthz-missing-on-canonical-https.md](incidents/2026-10-19-healthz-missing-on-canonical-https.md)。
+
 ## 四、环境前提
 
 - **控制端工具链**：`ansible-core 2.17.14` + Python 3.10.6（Ubuntu 22.04.1 的可用最高线）。
@@ -248,3 +256,4 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
 | 10-15 | k3s 装完却无限重启 | 宿主 cgroup v1，而 k8s v1.35+ 的 kubelet 直接拒绝在 v1 上启动 | [→](incidents/2026-10-15-cgroup-v1-blocks-kubelet.md) |
 | 10-15 | k3s 起来了但集群 0 Pod | 一个 CRD 停在 `Installing` —— 崩溃循环期间被写入的中间态 | [→](incidents/2026-10-15-crd-stuck-installing.md) |
 | 10-17 | ArgoCD 装上但 `redis` 一直 ImagePullBackOff | 镜像源的 docker.io 端点**间歇 502**；`/v2/` 探活正常**也不代表**能下 blob | [→](incidents/2026-10-17-registry-mirror-502.md) |
+| 10-19 | 健康检查在规范化 HTTPS 入口上 404 | 只验了 http 入口；www→裸域的 301 之后那个 server 块缺 `location = /healthz` | [→](incidents/2026-10-19-healthz-missing-on-canonical-https.md) |
