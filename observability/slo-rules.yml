@@ -34,14 +34,19 @@ groups:
         expr: 'avg_over_time(probe_success{job="blackbox"}[30d])'
 
       - record: slo:error_ratio:30d
-        expr: '1 - slo:sli_ratio:30d'
+        expr: '1 - avg_over_time(probe_success{job="blackbox"}[30d])'
 
+      # ⚠️ 不要写成 `1 - slo:error_ratio:30d / 0.005`（2026-10-19 v2 修正）：
+      # 记录规则互相引用，每跳一层就多等**一个评估周期**。实测链式三跳在 2 小时
+      # 窗口里的样本数是 6 / 5 / 4 / 3 —— 每跳晚 60 秒，合计 3 分钟。
+      # 而「刚重启完」恰恰是有人盯盘的时候，那 3 分钟里面板全是 No data。
+      # 改成直接从原始指标算：代价是重复一次 avg_over_time（单序列，可忽略）。
       - record: slo:error_budget_remaining:ratio
-        expr: '1 - slo:error_ratio:30d / 0.005'
+        expr: '1 - (1 - avg_over_time(probe_success{job="blackbox"}[30d])) / 0.005'
 
       # 把"剩余百分比"翻译成"还能坏多久"—— 分钟才是人能决策的单位
       - record: slo:error_budget_remaining:minutes
-        expr: 'slo:error_budget_remaining:ratio * 216'
+        expr: '(1 - (1 - avg_over_time(probe_success{job="blackbox"}[30d])) / 0.005) * 216'
 
       # ── 记录规则：多窗口烧钱率 ──────────────────────────────────
       - record: slo:burn_rate:5m

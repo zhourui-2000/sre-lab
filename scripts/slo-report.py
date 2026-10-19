@@ -16,6 +16,18 @@
   SLI 会**停在最后一个值**（看起来还是 99.9%）。所以这个工具必须
   同时报「样本数」和「探针 up」——只看百分比会被"无数据"骗。
 
+2026-10-19 v2 修正（三个假报警，都是判据本身的问题）：
+
+  ① **"近 15m 样本数 < 60" 不等于采集有洞。**
+     序列刚建立时窗口本来就没填满 —— 启动 5 分钟只有 20 个样本是**正常**的。
+     正确判据是「探针样本数 ≈ 同期 up 的样本数」（两者同为 15s 一跳）：
+     相等 → 没有洞；探针显著少于 up → 才是洞（探针挂了但 VM 还在写 up=0）。
+  ② **`count(ALERTS{...})` 在"没有告警"时返回空向量，不是 0**，
+     于是健康状态被显示成"无数据"。改成 `or vector(0)`。
+  ③ **记录规则链式引用会逐层延迟一个周期。** 实测（2026-10-19）：
+     sli 6 个样本 / error_ratio 5 / budget 4 / minutes 3 —— 每跳晚 60 秒。
+     规则已改成全部直接算（v2 补丁），这里再加一层本地换算兜底。
+
 数据来源：VictoriaMetrics 的 /api/v1/query，经 ssh 隧道访问（端口从不对外开）。
 
 退出码：0 健康；1 有风险（预算耗尽 / 快烧 / 链路断 / 无数据）；2 工具自身失效。
@@ -33,6 +45,7 @@ VM = "http://127.0.0.1:8428"
 
 SLO_TARGET = 0.995          # 与 observability/slo-rules.yml 保持一致
 BUDGET_MINUTES = 216.0      # 30 天 × 1440 × 0.5%
+SCRAPE_SECONDS = 15         # SLI job 的采集间隔
 
 # (key, 显示名, 表达式, 格式)
 QUERIES = [
@@ -44,8 +57,9 @@ QUERIES = [
     ("burn6h",  "烧钱率 6h",               'slo:burn_rate:6h',                                     "x"),
     ("burn3d",  "烧钱率 3d",               'slo:burn_rate:3d',                                     "x"),
     ("up",      "探针 up（取最小）",        'min(up{job=~"blackbox.*"})',                           "num0"),
-    ("samples", "近 15m 样本数（期望 60）",  'count_over_time(probe_success{job="blackbox"}[15m])',  "num0"),
-    ("firing",  "正在 firing 的告警",       'count(ALERTS{alertstate="firing"})',                   "num0"),
+    ("samples", "近 15m 探针样本数",        'count_over_time(probe_success{job="blackbox"}[15m])',  "num0"),
+    ("upsamp",  "近 15m up 样本数",         'count_over_time(up{job="blackbox"}[15m])',             "num0"),
+    ("firing",  "正在 firing 的告警",       'count(ALERTS{alertstate="firing"}) or vector(0)',      "num0"),
 ]
 
 
@@ -125,10 +139,17 @@ def main():
     for key, _label, _expr, _fmt in QUERIES:
         data[key], errs[key] = value_of(blocks.get(key))
 
+    notes = {}
+
+    # ③ 兜底：记录规则还没产出 minutes 时本地换算（并明确标出来，不静默）
+    if data["bmin"] is None and data["budget"] is not None:
+        data["bmin"] = data["budget"] * BUDGET_MINUTES
+        notes["bmin"] = "⚠️ 记录规则尚未产出，此值由脚本本地换算（ratio × 216）"
+
     if as_json:
         print(json.dumps({"host": host, "ts": int(time.time()),
                           "slo_target": SLO_TARGET,
-                          "values": data, "errors": errs},
+                          "values": data, "errors": errs, "notes": notes},
                          ensure_ascii=False, indent=2))
         return 0 if data.get("sli") is not None and (data.get("up") or 0) >= 1 else 1
 
@@ -150,29 +171,42 @@ def main():
         "burn6h":  "中烧阈值 6×（6 小时烧 5% 预算）",
         "burn3d":  "慢烧阈值 1×（3 天烧 10% 预算）",
         "up":      "0 = VM 抓不到探针（链路问题，不是站点问题）",
-        "samples": "远低于 60 = 采集有洞，SLI 不可信",
-        "firing":  "含主机的 4 条规则",
+        "samples": "应与下面 up 的样本数相同",
+        "upsamp":  "同一 job 另一条序列，用作「应有的样本数」基准",
+        "firing":  "含主机的 4 条规则；0 才是常态",
     }
     for key, label, _expr, style in QUERIES:
         v = data[key]
-        note = hints.get(key, "")
-        if v is None:
+        note = notes.get(key) or hints.get(key, "")
+        if v is None and key not in notes:
             note = "⚠️ " + (errs.get(key) or "无数据")
         print("  %-22s %14s   %s" % (label, fmt(v, style), note))
     print("  " + "-" * 70)
 
     fails, warns = [], []
+
+    # ── SLI / 预算 ──
     if data["sli"] is None:
         fails.append("SLI 无数据 —— 探针可能还没落库或 job 名不对")
     elif data["sli"] < SLO_TARGET:
         fails.append("SLI %.3f%% 已低于目标 %.1f%%" % (data["sli"] * 100, SLO_TARGET * 100))
-    if data["up"] is None or data["up"] < 1:
-        fails.append("探针链路断（up=%s）—— 此时 SLI 不可信" % fmt(data["up"], "num0"))
-    if data["samples"] is not None and data["samples"] < 40:
-        fails.append("近 15 分钟只有 %d 个样本（期望 60）—— 采集有洞"
-                     % round(data["samples"]))
     if data["budget"] is not None and data["budget"] < 0:
         fails.append("错误预算已超支 %.1f%%" % (-data["budget"] * 100))
+
+    # ── 探针链路 ──
+    if data["up"] is None or data["up"] < 1:
+        fails.append("探针链路断（up=%s）—— 此时 SLI 不可信" % fmt(data["up"], "num0"))
+
+    # ── 采样完整性（v2 判据：探针样本 vs up 样本，而不是拍一个 60）──
+    n_p, n_u = data["samples"], data["upsamp"]
+    if n_u is None or n_u == 0:
+        fails.append("近 15 分钟连 up 都没有样本 —— 采集完全停摆")
+    elif n_p is None:
+        fails.append("探针序列无样本（同期 up 有 %d 个）—— 探针挂了或过滤条件不对" % round(n_u))
+    elif n_p < n_u * 0.8:
+        fails.append("探针样本 %d 个，同期 up 有 %d 个 —— 采集有洞" % (round(n_p), round(n_u)))
+
+    # ── 烧钱率 ──
     if data["burn1h"] is not None and data["burn1h"] > 14.4:
         fails.append("1 小时烧钱率 %.1f× > 14.4× —— 快速燃烧" % data["burn1h"])
     if data["burn6h"] is not None and data["burn6h"] > 6:
@@ -182,9 +216,14 @@ def main():
     if data["firing"]:
         warns.append("有 %d 条告警正在 firing（用 ALERTS 查是哪条）" % round(data["firing"]))
 
+    # ── 信息性提示（不算失败）──
+    if n_u is not None and data["sli"] is not None and n_u < 60:
+        warns.append("采样窗口还没填满（up 只有 %d 个样本，满窗是 60）—— 刚启动的正常现象，不是故障"
+                     % round(n_u))
+
     print("判据：")
     if not fails and not warns:
-        print("  ✅ 预算未耗尽 · 链路在 · 无燃烧")
+        print("  ✅ 预算未耗尽 · 链路在 · 采样完整 · 无燃烧")
     for x in fails:
         print("  ❌ " + x)
     for x in warns:
