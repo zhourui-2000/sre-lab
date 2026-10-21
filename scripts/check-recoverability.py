@@ -189,7 +189,7 @@ def main():
         print("  （没有被 .gitignore 排除的已跟踪路径）")
     print()
     print("  备份目录扫描：%s" % ("、".join(backups) if backups else "**一个都没有**"))
-    print("  IaC 模板：仓库里 ansible/roles 下共 %d 个文件" % len(iac_files))
+    print("  IaC 单元：%d 个，命中模板 %d 个" % (len(iac_map), sum(1 for v in iac_map.values() if v)))
 
     if verbose:
         print()
