@@ -254,8 +254,10 @@ kubelet 把 Pod 放在**与 `k3s.service` 同级**的 `/kubepods.slice`，只读
   `letsencrypt` + `alertmanager` 密钥）**3.1 MB 加密外发**，RPO = 上次备份到现在的时长；
   **A 层 1.8 G**（containerd 镜像层 + k3s 二进制）可再生产、**不备**；
   **C 层 89 M** 压不动（`vmdata` gzip 比率 **0.98**）、**明确认输**。
-  恢复演练验到 **L3**（可解密 / 解包 / `integrity_check` / 证书与密钥配对），
-  **L4「让干净的 k3s 用这份 db 真正起来」未证**（2 G 放不下第二份，真验要停生产）。
+  恢复演练验到 **L4**（2026-10-22）：空状态起 k3s，用备份的 `db/tls/token/cred/etc` 覆盖，
+  `namespace 6 / pods 8 / deployments 7 / secrets 9` 全部回来，且 **`creationTimestamp` 保留原值**
+  —— 是同一批对象，不是重建出来的等价对象。R3 全程 **339 s**，站点不受影响（预算消耗 0）。
+  **仍空着**：同一份 db 搬到另一台机器（证书绑 hostname/IP）、MTTR。
   口径、三层划分与演练记录见 [`dr.md`](dr.md) 第 6–7 节。
 - 各类故障 **MTTR** —— **仍未测**。需要真实故障或受控注入；容灾侧的 RTO/RPO 已闭环，
   MTTR 属于「故障发生后多久修好」，是另一个维度，留到后续周期。

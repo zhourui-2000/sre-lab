@@ -201,9 +201,11 @@ C 层认输的理由：**压不动也传不动**。61 MB 走 GitHub 通道（曾
 | L1 | 校验和一致 + 能解密 + 能解包 | ✅ 已验 |
 | L2 | `integrity_check=ok`、行数 > 0、关键对象在（6 个 namespace、Application hello） | ✅ 已验 |
 | L3 | k3s 集群链 `openssl verify` OK；letsencrypt 私钥与证书公钥匹配 | ✅ 已验 |
-| L4 | **让一个干净的 k3s 用这份 db 真正起来** | ❌ **未证** |
+| L4 | **让一个干净的 k3s 用这份 db 真正起来** | ✅ **已验（2026-10-22，见 7.10）** |
 
-L4 不做的原因：2 G 机器放不下第二份 k3s，真验要停生产。
+L4 首版标「未证」，理由是 2 G 机器放不下第二份 k3s、真验要停生产。
+2026-10-22 换了个做法做到：**不装第二份，把唯一那份的状态挪走** —— 只停 k3s，站点全程不受影响。
+过程与判据见 7.10。
 **所以「这份备份可用」这句话的上限是 L3。** 谁要在真灾难里用它，必须先接受这一点。
 
 ### 7.6 一个容易看错的地方
@@ -317,3 +319,85 @@ bash scripts/backup-state.sh /root/backup
 
 - `/dtb/` `/story/` 是 29 MB / 21 MB 的整页，**GET 会超时**，验证状态码要用 `curl -I`（HEAD）；
 - 目标端没有 `rsync`，跨机传输用 `tar -cf - | ssh 'tar -xf -'`。
+
+### 7.10 L4 落地：让干净的 k3s 用这份备份起来（2026-10-22）
+
+**做法**：不重装 k3s，只把「程序」和「状态」分开动 ——
+
+```
+systemctl stop k3s
+mv /var/lib/rancher /var/lib/rancher.bak-190733     # 1.8 G，整个挪走当回滚点
+# ① 空状态起一次 → 留作对照组
+# ② 再停 → 用备份的 db / tls / token / cred / etc 覆盖
+# ③ 再起
+```
+
+**为什么只动状态、不动二进制**：一次只变一个变量。同时重下 81 MB 二进制的话，
+失败时分不清是「db 没用」还是「二进制没下对」。
+
+#### 时间线（实测，journald 与文件时间戳）
+
+| 时刻 | 事件 | 距上一节点 |
+|---|---|---|
+| 19:07:28 | `stop k3s`（T0） | — |
+| 19:07:33 | `/var/lib/rancher` 已挪走 | 5 s |
+| 19:07:57 | 空状态启动 | — |
+| ~19:08:2x | `kubectl` 可查：**只有 4 个 namespace** | **≈ 20 s** |
+| 19:08:26 | 再停（准备覆盖） | — |
+| 19:09:09 | 备份 5 件套覆盖完成 | **≈ 92 s**（含输口令、解密、解包） |
+| 19:10:01 | 恢复后启动 | — |
+| 19:10:10 | apiserver 可用，`Application hello` 秒级可见 | **9 s** |
+| 19:11:41 | `hello` 容器 Running | — |
+| 19:13:07 | 4 个 ArgoCD 容器全 Running | **177 s**（重拉 313 MB 镜像 + 1 次探针重启） |
+
+**R3 合计 = 339 s（5 分 39 秒）**。其中「对象回来」只用 9 s，
+剩下 177 s 全是拉镜像 —— `agent/` 目录跟着状态一起被挪走，6 个镜像 313 MB 必须重下
+（最大 `quay.io/argoproj/argocd:v3.5.5` 222 MB），44 个 blob 落盘时间集中在 19:11–19:12。
+
+**站点全程 200**（nginx 在 compose，与 k3s 无关）→ **错误预算消耗 0**。
+
+#### 判据：数对得上是弱证据，身份对得上才是强证据
+
+恢复后 `namespace 6 / pods 8 / deployments 7 / secrets 9` 与重建前完全相同 —— 但**这不足以证明 db 有效**：
+
+`k8s/argocd/applications/hello.yaml` 和 `k8s/apps/hello/` 都在仓库里。
+也就是说，一个全新的 k3s 加一次 `kubectl apply` 能造出**一样多的对象**。
+数量对上，完全可能是「Git 重建」而不是「db 恢复」。
+
+真正的判据是 **`creationTimestamp`** —— 它存在 db 里，重建过程造不出来：
+
+```
+kube-system   coredns-...                    2026-10-15T12:55:47Z   ← 原值
+argocd        4 个 Pod                       2026-10-17T07:44:56Z   ← 原值
+hello         hello-69597fcbcb-r48lb         2026-10-19T00:56:23Z   ← 原值
+argocd        Application hello              2026-10-17T08:34:37Z   ← 原值
+```
+
+**Pod 是「同一批对象」，不是「等价的新对象」** —— L4 至此成立。
+
+#### 对照组的作用
+
+空状态那一次（`empty-server/db/state.db`）：**kine 439 行、namespace 只有 4 个**
+（`default` / `kube-node-lease` / `kube-public` / `kube-system`），`argocd` **不存在**。
+
+先看见「空」，再看见「满」，才知道「满」是备份带来的 ——
+否则「对象都在」也可能是某个机制自己装回来的。
+
+#### 行数变多是正常的
+
+`kine 1461 行（备份）→ 1770 行（恢复后）`。**+309 是 k3s 启动后自己写的**
+（Lease 续约、Event、status 更新）。判据不是「行数相等」，而是「≥ 备份值且量级一致」。
+
+#### L4 之后仍然空着的
+
+- **同一份 `state.db` 搬到「另一台机器」能不能起来** —— 本次是同机、同 IP、同 hostname。
+  k3s 证书里绑了 hostname / IP，换机器要重新签，这条没验；
+- **MTTR** 仍然空着（`baseline.md` 待补基线）。
+
+#### 顺带发现：`ansible/roles/k3s` 不含安装步骤
+
+`ansible/roles/k3s/tasks/main.yml` 只有 37 行，只部署 `config.yaml` + `registries.yaml`。
+完整的安装命令（`INSTALL_K3S_MIRROR` / `INSTALL_K3S_SKIP_SELINUX_RPM` / `INSTALL_K3S_VERSION`）
+**没有落库**，只在事故记录里被提过一句。
+
+→ 「删掉整机也能重建」在 k3s 这一层仍是断的：配置能重建，安装靠人回忆。列为待办。
