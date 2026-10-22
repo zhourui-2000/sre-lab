@@ -112,7 +112,7 @@ ansible-playbook site.yml        # 应用主机配置
          **探针挂了 SLI 停在旧值**（无数据 ≠ 0 成功）
    - 细节见 [`slo.md`](docs/slo.md)，决策见 [ADR 0005](docs/adr/0005-blackbox-on-docker-compose.md)
 - [x] Week 7  韧性演练与灾备验证
-   - [x] RTO —— 影子重建：站点 8 s / 指标 9 s（已扣 sleep），错误预算消耗 0
+   - [x] RTO —— 影子 8 s（脚本、只起壳）/ **完整 134 s**（手工 98 s + 内容 36 s）/ 含排障 14 min
    - [x] 备份 —— B 层 3.1 MB 加密外发；A 层 1.8 G 可再生不备，C 层 89 M 认输
    - [x] 恢复演练 —— 五段验证全绿；错口令与篡改归档均被拦住
    - 细节见 dr.md；MTTR 未测，列在 baseline 待补基线
