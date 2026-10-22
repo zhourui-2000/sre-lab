@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# sre-lab · 校验一次备份（Week 7-B · 2026-10-21）
+# sre-lab · 校验一次备份（Week 7-B · 2026-10-22 加固版）
 #
 # 默认只把归档解密到 /tmp 验证，**不碰任何生产文件**。
 #
 # 用法：
-#   read -rsp '备份口令: ' SRE_BACKUP_PASS; echo; export SRE_BACKUP_PASS
+#   read -rsp '备份口令: ' SRE_BACKUP_PASS; echo      ← ★ 单独一行，不要整块粘贴
+#   export SRE_BACKUP_PASS
 #   bash scripts/restore-state.sh /root/backup/<TS>.tar.gz.enc
 #
 # 为什么不提供 --apply：
 #   ① 覆盖面最大的操作应该最难误触发；
 #   ② 「让一个干净的 k3s 用这份 db 真正起来」在 2 G 机上没法安全演练（要停生产），
 #      所以它是 dr.md 第 7.5 节里明确标注的 **未证事项（L4）**，不该由脚本替你拍板。
+#
+# 2026-10-22 加固：解密**之前**先对比 meta 里的 pass_len。
+#   长度不对就直接说清楚，而不是甩一句 bad decrypt 让人猜是口令还是文件。
 set -euo pipefail
 
 ARC=${1:?用法: restore-state.sh <归档.tar.gz.enc>}
@@ -38,14 +42,32 @@ else
   say "  ⚠️  没有 .sha256 —— 无法证明文件没被改过"
 fi
 
-hdr "2/5 解密 + 解包"
+hdr "2/5 口令长度对照（★ 解密前先拦，不用等 bad decrypt）"
+META="${ARC%.tar.gz.enc}.meta"
+GLEN=$(printf %s "$SRE_BACKUP_PASS" | wc -c)
+if [ -f "$META" ]; then
+  WLEN=$(awk '/^pass_len:/{print $2}' "$META")
+  if [ -n "$WLEN" ] && [ "$WLEN" != "$GLEN" ]; then
+    echo "  ❌ 口令长度不对：归档当时是 ${WLEN} 字节，你输入了 ${GLEN} 字节"
+    if [ "$GLEN" -gt 64 ]; then
+      echo "     ${GLEN} 字节太长了 —— 多半是整块粘贴时 read 把后面的命令也吃进了口令。"
+      echo "     请只输入「read」那一行，再手工敲口令（2026-10-22 真实事故）"
+    fi
+    exit 5
+  fi
+  say "  ✅ ${GLEN} 字节，与 meta 一致"
+else
+  say "  ⚠️  没有 .meta，跳过长度对照"
+fi
+
+hdr "3/5 解密 + 解包"
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
   -pass env:SRE_BACKUP_PASS -in "$ARC" -out "$WORK/bundle.tar.gz"
 mkdir -p "$TREE"
 tar -xzf "$WORK/bundle.tar.gz" -C "$TREE"
 say "  $(find "$TREE" -type f | wc -l) 个文件 · $(du -sh "$TREE" | cut -f1)"
 
-hdr "3/5 state.db"
+hdr "4/5 state.db + 证书"
 DB="$TREE/var/lib/rancher/k3s/server/db/state.db"
 [ -f "$DB" ] || { echo "  ❌ 归档里没有 state.db"; exit 3; }
 IC=$(sqlite3 "$DB" 'PRAGMA integrity_check')
@@ -57,7 +79,6 @@ NS=$(sqlite3 "$DB" "select count(*) from kine where name like '%/registry/namesp
 APP=$(sqlite3 "$DB" "select count(*) from kine where name = '/registry/argoproj.io/applications/argocd/hello'")
 say "  namespace ${NS} 个 · Application hello ${APP} 条"
 
-hdr "4/5 证书"
 TLS="$TREE/var/lib/rancher/k3s/server/tls"
 if [ -f "$TLS/server-ca.crt" ] && [ -f "$TLS/serving-kube-apiserver.crt" ]; then
   r=$(openssl verify -CAfile "$TLS/server-ca.crt" "$TLS/serving-kube-apiserver.crt" 2>&1 || true)
