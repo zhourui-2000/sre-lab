@@ -1,65 +1,61 @@
 # Runbook（症状速查）
 
-> 面向"出事时快速出手"：**症状 → 一条命令定位 → 修复**。原理与故事见 [`incidents/`](incidents/)。
+每行给出症状、定位命令、修复动作。原理与故事见 [`incidents/`](incidents/)。
 
 ## 部署类
 
-| 症状 | 一条命令定位 | 修复 |
+| 症状 | 定位 | 修复 |
 |---|---|---|
 | 改了配置但没生效 | `git -C /opt/sre-lab log --oneline -1` 与本机对比 | 服务器 `git status`；有 `M` 先处理，再 `git pull` |
-| **改了挂载的配置文件，容器却没变** | `docker exec <c> cat <容器内配置路径>` 与宿主机对比 | `docker compose up -d --force-recreate <c>`（见下节） |
+| 改了挂载的配置文件，容器却没变 | `docker exec <c> cat <容器内配置路径>` 与宿主对比 | `docker compose up -d --force-recreate <c>` |
 | 容器是旧版本 | `docker inspect <c> --format '{{.Config.Image}}'` | `docker compose up -d --force-recreate <c>` |
-| 容器 crash loop，日志 `permission denied` | `docker inspect <c> --format '{{.Config.User}}'` + `ls -la <配置文件>` | 按**消费方身份**调权限；或见下节「密钥文件」 |
-| `docker compose up` 直接退出无提示 | `docker compose config` | 按报错修 YAML（注意 `test` 数组里的数字要加引号） |
-| Ansible 报模块错误 / ping 失败 | `ansible lab -m ping -vvv`，看 `module_stderr` | 确认 inventory 用 `/usr/bin/python3.11` |
-| **`ansible` 不报错但完全没生效**（`ignoring it as an ansible.cfg source` / `Could not match supplied host pattern`） | `find /root/sre-lab -perm -o+w \| wc -l` | `chmod -R go-w /root/sre-lab`（见下节「控制端迁移后」） |
-| 推送后服务器没变 | `tail -3 /var/log/sre-relay.log` + `git log --oneline -1` | 钩子失败不回滚，需手工重推 |
-| **还原/回滚了但没生效** | `git log --oneline -4` 看那条 Revert 提交的标题对不对 | 用显式 SHA 重来，见下节「回滚操作」 |
+| 容器 crash loop，日志 `permission denied` | `docker inspect <c> --format '{{.Config.User}}'` + `ls -la <配置文件>` | 按消费方身份调权限，见下节「密钥文件」 |
+| `docker compose up` 直接退出无提示 | `docker compose config` | 按报错修 YAML（`test` 数组里的数字要加引号） |
+| Ansible 报模块错误 / ping 失败 | `ansible lab -m ping -vvv` 看 `module_stderr` | 确认 inventory 用 `/usr/bin/python3.11` |
+| `ansible` 不报错但完全没生效（`ignoring it as an ansible.cfg source` / `Could not match supplied host pattern`） | `find /root/sre-lab -perm -o+w \| wc -l` | `chmod -R go-w /root/sre-lab`，见下节「控制端迁移后」 |
+| 推送后服务器没变 | `tail -3 /var/log/sre-relay.log` + `git log --oneline -1` | 钩子失败不回滚，手工重推 |
+| 还原 / 回滚了但没生效 | `git log --oneline -4` 看那条 Revert 提交的标题对不对 | 用显式 SHA 重来，见下节「回滚」 |
 | `git push` 挂起无输出 | `ssh -T git@github.com` | 切手机热点，或 `git push relay main` |
-| **重建后脚本 `Permission denied`**（磁盘上明明是 `755`） | `git ls-files -s <file>` + `git config core.fileMode` | `git config core.fileMode true` → `git add` 提交；**用 `git clone` 实测**（见下节） |
-| **`git status` 显示 ahead / behind，但实际已同步** | `git ls-remote origin refs/heads/main`（实时） | 本地引用过期，**不是真分叉**；`origin/main` 不作证据 |
-| 服务器上出现 IaC 里没有的防火墙规则 | `python3 scripts/check-fw-drift.py` | 补进 `security` 角色 loop，或从服务器移除（**增量式 IaC 不会替你删**） |
+| 重建后脚本 `Permission denied`（磁盘上明明是 755） | `git ls-files -s <file>` + `git config core.fileMode` | `git config core.fileMode true` → `git add` 提交；用 `git clone` 实测 |
+| `git status` 显示 ahead / behind，但实际已同步 | `git ls-remote origin refs/heads/main` | 本地引用过期，不是真分叉；`origin/main` 不作证据 |
+| 服务器上出现 IaC 里没有的防火墙规则 | `python3 scripts/check-fw-drift.py` | 补进 `security` 角色 loop，或从服务器移除（增量式 IaC 不会替你删） |
 
 ## 观测类
 
-| 症状 | 一条命令定位 | 修复 |
+| 症状 | 定位 | 修复 |
 |---|---|---|
 | Grafana 无数据 / `up=0` | `curl -s 127.0.0.1:8428/api/v1/targets` | 查 firewalld 是否拦 trusted 网段；确认容器同一网络 |
 | 告警规则不触发 | `curl -s 127.0.0.1:8880/api/v1/rules` 看 `health` | 查规则文件是否挂载、表达式是否成立 |
-| **改了告警规则但没触发** | `curl -s 127.0.0.1:8880/api/v1/rules` → 比对 `query`/`duration` 与文件内容 | `docker compose up -d --force-recreate vmalert` |
+| 改了告警规则但没触发 | 同上，比对 `query` / `duration` 与文件内容 | `docker compose up -d --force-recreate vmalert` |
 | 规则 firing 但 VM 查不到 `ALERTS` | `docker inspect vmalert --format '{{.Config.Cmd}}'` | 补 `--remoteWrite.url` |
-| 规则 firing 但 alertmanager 收不到 | `docker logs vmalert --tail 40 \| grep -i notifier` | 确认 alertmanager 服务存在、`--notifier.url` 可达 |
-| 收到告警但没人被通知 | 三点同验 + 查收件箱，见 [`methodology ⑦`](methodology.md) | 查 `docker logs alertmanager \| grep -i smtp` |
+| 规则 firing 但 alertmanager 收不到 | `docker logs vmalert --tail 40 \| grep -i notifier` | 确认 alertmanager 存在、`--notifier.url` 可达 |
+| 收到告警但没人被通知 | 三点同验 + 查收件箱（[methodology ⑦](methodology.md)） | `docker logs alertmanager \| grep -i smtp` |
 | 容器恒 unhealthy | `docker inspect <c> --format '{{json .State.Health}}'` | healthcheck 别用 `localhost`，改 `127.0.0.1` |
-| **Grafana 数据源/面板不见了** | `docker exec grafana ls /etc/grafana/provisioning/datasources/` | 确认 compose 挂了 `./grafana/provisioning` 与 `./grafana/dashboards`，再 `up -d --force-recreate grafana` |
-| **Loki 起不来 / `permission denied`** | `docker logs loki --tail 20` | 宿主目录属主错：`install -d -o 10001 -g 10001 /opt/sre-lab/observability/loki-data && docker compose up -d --force-recreate loki` |
-| **Loki 没就绪** | `curl -s 127.0.0.1:3100/ready`（返回 `ready` 才算好） | 看 `docker logs loki`；⚠️ 3.6+ 镜像**无 shell**，`docker exec loki sh` 一定失败，别浪费时间 |
-| **容器日志没进 Loki** | `curl -s 127.0.0.1:12345/metrics \| grep loki_write_sent` | 确认 alloy 挂了 `docker.sock`；看 `docker logs alloy` |
-| **journald 日志没进 Loki** | 同上一行 | 确认挂了 `/etc/machine-id`（缺它 journal 源读不到内容）与 `/var/log/journal` |
-| **日志查不动 / Loki 内存打满** | `docker stats --no-stream loki` | 收紧 `limits_config.max_query_series` / `max_query_parallelism`，或缩短 `retention_period` |
+| Grafana 数据源 / 面板不见了 | `docker exec grafana ls /etc/grafana/provisioning/datasources/` | 确认 compose 挂了 `./grafana/provisioning` 与 `./grafana/dashboards`，再 `up -d --force-recreate grafana` |
+| Loki 起不来 / `permission denied` | `docker logs loki --tail 20` | 宿主目录属主错：`install -d -o 10001 -g 10001 /opt/sre-lab/observability/loki-data && docker compose up -d --force-recreate loki` |
+| Loki 没就绪 | `curl -s 127.0.0.1:3100/ready`（返回 `ready` 才算好） | 看 `docker logs loki`。3.6+ 镜像无 shell，`docker exec loki sh` 一定失败 |
+| 容器日志没进 Loki | `curl -s 127.0.0.1:12345/metrics \| grep loki_write_sent` | 确认 alloy 挂了 `docker.sock`，看 `docker logs alloy` |
+| journald 日志没进 Loki | 同上 | 确认挂了 `/etc/machine-id`（缺它 journal 源读不到内容）与 `/var/log/journal` |
+| 日志查不动 / Loki 内存打满 | `docker stats --no-stream loki` | 收紧 `limits_config.max_query_series` / `max_query_parallelism`，或缩短 `retention_period` |
 | 镜像拉不下来 | `docker pull <img>` 看卡在哪一步 | 加前缀 `docker.m.daocloud.io/...` 再 `docker tag` |
 
-## 改了被挂载的配置文件（★ 最容易踩）
+## 改了被挂载的配置文件（最容易踩）
 
-> **改配置 ≠ 容器生效。** `docker compose up -d` 只比较**服务定义**，不比较挂载文件内容；
-> 而且 `cp` / 编辑器 / `git pull` 覆盖文件都是 **rename 替换** → **换 inode**，旧容器仍指向旧 inode —— 连 `restart` 都不管用。
-> **一律 `--force-recreate`。**
+`up -d` 只比较服务定义，不比较挂载文件内容；而 `cp` / 编辑器 / `git pull` 覆盖都是 rename 替换，会换 inode，旧容器仍指旧 inode，`restart` 也不管用。**一律 `--force-recreate`。**
 
-> **热重载不是兜底。** 程序自带的文件监视（vmalert / nginx 等）靠 **inotify**，而 inotify 盯的是 **inode**；
-> 文件被 rename 替换后监视对象就消失了，**不会自动重载**（2026-10-10 实测踩到）。
-> 只有 `--force-recreate` 可靠。
+热重载不是兜底：vmalert / nginx 的文件监视靠 inotify，盯的是 inode，文件被 rename 替换后监视对象就消失了（10-10 实测踩到）。
 
 ```sh
 cd /opt/sre-lab/observability
 docker compose config >/dev/null && echo "配置合法" || echo "语法错，别重建"
 docker compose up -d --force-recreate <svc>
-docker inspect <svc> --format '{{.Config.Cmd}}'   # ① 确认启动参数
-docker exec <svc> cat <容器内配置路径> | head      # ② 确认容器读到的是新内容 ← 真正的判据
+docker inspect <svc> --format '{{.Config.Cmd}}'   # ① 启动参数
+docker exec <svc> cat <容器内配置路径> | head      # ② 容器读到的内容 ← 真正的判据
 ```
 
 ### alertmanager 配置（密钥文件，不在仓库里）
 
-真实配置在 **`/root/.sre-lab-secrets/alertmanager.yml`**；目录 `700`、文件 **`644`**。
+真实配置在 `/root/.sre-lab-secrets/alertmanager.yml`，目录 `700`、文件 **`644`**。
 
 ```sh
 vim /root/.sre-lab-secrets/alertmanager.yml
@@ -68,17 +64,11 @@ cd /opt/sre-lab/observability && docker compose up -d --force-recreate alertmana
 docker logs alertmanager --tail 10 | grep -iE "permission|error|Listening"
 ```
 
-> ⚠️ **判据必须在容器视角下取**（`docker exec`）。在宿主用 `sudo -u nobody cat /root/.sre-lab-secrets/...`
-> 会被 `/root` 的 750 挡住，输出 `Permission denied` —— 那是**假阴性**，不代表容器读不到。
->
-> ⚠️ **文件权限保持 `644`，不要改成 600**：容器以 `nobody` 运行，600 会让它读不到而 crash loop。
-> 保护来自目录权限，不来自文件权限（见 [ADR 0002](../adr/0002-secret-file-permissions.md)）。
+判据必须在容器视角下取。宿主上 `sudo -u nobody cat /root/.sre-lab-secrets/...` 会被 `/root` 的 750 挡住，输出 `Permission denied`，那是假阴性。文件权限保持 `644` 不要改 600：容器以 `nobody` 运行，600 会 crash loop。保护来自目录权限（[ADR 0002](../adr/0002-secret-file-permissions.md)）。
 
-## 回滚 / 还原操作的固定动作
+## 回滚 / 还原的固定动作
 
-> **不要用 `HEAD` / `HEAD~1` 当还原目标。** 相对引用指向「当前位置」，
-> 期间任何新提交都会让它指向别的东西 —— 而这类错位**后果是静默的**：
-> 撤销了无关改动（你多半发现不了），真正该撤的临时配置却留在生产里。
+不要用 `HEAD` / `HEAD~1` 当还原目标。相对引用指向当前位置，期间任何新提交都会让它指向别的东西，而错位是静默的：撤销了无关改动（多半发现不了），真正该撤的临时配置留在生产里。
 
 ```sh
 cd /root/sre-lab
@@ -94,19 +84,17 @@ git show --stat "$SHA"
 # ③ 显式 SHA 还原
 git revert --no-edit "$SHA"
 
-# ④ 确认那条 Revert 提交指向的是目标提交（标题里应出现原提交的关键词）
+# ④ 确认那条 Revert 提交指向目标提交（标题里应出现原提交的关键词）
 git log --oneline -3
 
 git push relay main
 ```
 
-还原后仍要按「改了被挂载的配置文件」走一遍 `--force-recreate`，并**验生效值**。
+还原后仍要按上节走一遍 `--force-recreate`，并验生效值。
 
 ## 控制端迁移 / 重建后的固定动作
 
-> 跨文件系统拷贝（Windows 侧解包 → `/mnt/c` → WSL）**不保留 Unix 权限位**，
-> 整棵树回落 `0777`；而 Ansible **拒绝从全局可写目录读取 `ansible.cfg`** ——
-> inventory 与 `roles_path` 全部失效，**不报错、只降级**（见 [methodology ⑭](methodology.md)）。
+跨文件系统拷贝（Windows 侧解包，经 `/mnt/c` 进 WSL）不保留 Unix 权限位，整树回落 `0777`；Ansible 拒绝从全局可写目录读取 `ansible.cfg`，inventory 与 `roles_path` 全部失效，不报错只降级（[methodology ⑭](methodology.md)）。
 
 ```sh
 # ① 权限收敛（判据：应为 0）
@@ -123,19 +111,15 @@ cd /root/sre-lab/ansible && ansible lab -m ping
 # ④ 工具链版本（控制端 Python 决定 ansible-core 上限）
 ansible --version | head -1
 
-# ⑤ 权限位是否真的进了版本控制
-#    磁盘 755 ≠ 索引 755 ≠ 重建后 755 —— 会被重建的是【索引里记录的模式】
+# ⑤ 权限位是否真的进了版本控制（磁盘 755 ≠ 索引 755 ≠ 重建后 755）
 git config core.fileMode                    # 期望 true（false 则 chmod +x 完全不生效）
 git ls-files -s scripts/check-fw-drift.py   # 期望 100755
-git clone -q /root/sre-lab /tmp/clone-check # 实测重建结果
+git clone -q /root/sre-lab /tmp/clone-check
 stat -c '%a' /tmp/clone-check/scripts/check-fw-drift.py   # 期望 755
 rm -rf /tmp/clone-check
 ```
 
-> ⚠️ **`--syntax-check` 通过不算通过验收** —— 它不依赖 inventory，
-> 在"配置完全没被加载"的状态下同样会打印 `playbook: site.yml`。
-> 同批迁移还会把 `/root/.gitconfig`、`/root/.ssh/*` 一起带成 0777，顺手收敛：
-> `chmod 644 /root/.gitconfig && chmod 600 /root/.ssh/*`。
+`--syntax-check` 通过不算验收：它不依赖 inventory，在配置完全没被加载时同样会打印 `playbook: site.yml`。同批迁移还会把 `/root/.gitconfig`、`/root/.ssh/*` 带成 0777，顺手收敛：`chmod 644 /root/.gitconfig && chmod 600 /root/.ssh/*`。
 
 ## 推送后必做（relay 链）
 
@@ -144,15 +128,8 @@ tail -3 /var/log/sre-relay.log              # 钩子是否执行成功
 cd /opt/sre-lab && git log --oneline -1     # 工作副本是否已同步
 ```
 
-> `post-receive` 钩子**失败不会拒绝推送**——relay 已收到提交，但 GitHub / 工作副本可能没同步。
-> 所以推完必须校验这两条，不能只看"推送成功"。
+`post-receive` 钩子失败不会拒绝推送：relay 已收到提交，但 GitHub / 工作副本可能没同步。推完必须校验这两条。
 
-完整核验用工作区脚本 **`check-three-ends.sh`**（四方：local / relay / server / GitHub 实时，
-含重试与钩子日志兜底，退出码 `0`/`1`）。
+完整核验用工作区脚本 `check-three-ends.sh`（四方：local / relay / server / GitHub 实时，含重试与钩子日志兜底，退出码 0/1）。
 
-> ⚠️ **不要用 `git fetch origin && git rev-parse origin/main` 判断 GitHub。**
-> `origin/main` 只是**本地缓存**，`git fetch` 失败（WSL2 DNS 间歇）时**不报错、只保留旧值** ——
-> 过期缓存会被读成"GitHub 落后"。这个假信号已出现 **3 次**。判断远端一律 `git ls-remote`。
-
-> ⚠️ **核验命令不要写 `2>/dev/null`** —— 它会把"fetch 失败"这个唯一线索吞掉，
-> **让失败伪装成结论**（见 [methodology ⑯](methodology.md)）。
+判断远端一律 `git ls-remote`。不要用 `git fetch origin && git rev-parse origin/main`：`origin/main` 只是本地缓存，`git fetch` 失败（WSL2 DNS 间歇）时不报错只保留旧值，过期缓存会被读成"GitHub 落后"，这个假信号已出现 3 次。核验命令也不要写 `2>/dev/null`，它会把"fetch 失败"这个唯一线索吞掉（[methodology ⑯](methodology.md)）。
