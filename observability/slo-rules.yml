@@ -75,6 +75,19 @@ groups:
           summary: "站点不可用：探针连续 3 分钟不是 200"
           description: "{{ $labels.instance }} —— 此时 SLI 确实在掉，不是测量故障。"
 
+      # ── 快速通道：3 分钟以内的中断，上面那条永远追不上 ─────────
+      # 2026-10-22 实测：R1 停机 105 s，SiteDown 只到 pending（8 个样本）、
+      # 零 firing、alertmanager 零通知 —— 因为 for: 3m > 中断时长。
+      # 检测延迟最坏分解：抓取 15 s + 评估 60 s + for 60 s = 135 s。
+      # 分层而不是把 SiteDown 的 for 调小：调小会把抖动也变成通知（报警疲劳）。
+      - alert: SiteDownFast
+        expr: 'probe_success{job="blackbox"} == 0'
+        for: 1m
+        labels: { severity: warning, layer: sli }
+        annotations:
+          summary: "站点可能不可用：探针连续 1 分钟不是 200（快速通道）"
+          description: "{{ $labels.instance }} —— 早于 SiteDown 的提示，用于覆盖 1–3 分钟的中断。若随后收到 SiteDown，以 SiteDown 为准。"
+
       # ── 告警：测量链路坏了（与上面是两件事）────────────────────
       - alert: ProbePipelineDown
         expr: 'up{job=~"blackbox.*"} == 0'
