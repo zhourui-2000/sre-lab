@@ -75,3 +75,6 @@ cd ansible && ansible lab -m ping && ansible-playbook site.yml
 - SLI 只覆盖 `/healthz`，不含 `/`、`/dtb/` 等真实页面路径与传输耗时。
 - 内容层（`dtb/ story/ quiz/`，49 MB）不在 Git，唯一副本是 WSL 手工副本。
 - 无 CI；`host_key_checking = False`；k3s 未开 `secrets-encryption`；K8s 层无告警。
+- `MemoryHigh` 阈值 85% 贴着稳态（available 245–346 MB ≈ 82–87% 使用），会间歇 pending/firing；
+  没改成「可用内存 < 200 MB」这种绝对判据 —— 改了才能区分「一直紧张」和「真的撑不住」。
+- 站点未纳入 GitOps（80/443 归属 + `/etc/letsencrypt` 跨宿主/k8s 边界两道硬阻塞，见 `docs/adr/`）。
