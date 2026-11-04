@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-from _common import ROOT, md_files
+from _common import ROOT, md_files, tracked
 
 ROOTS = ("scripts/", "docs/", "observability/", "k8s/", "ansible/", "nginx/")
 FILE_EXT = (".py", ".md", ".yml", ".yaml", ".sh", ".json", ".conf", ".example")
@@ -40,7 +40,20 @@ def looks_like_path(tok):
     return None
 
 
+def _exists(rel, tracked_set):
+    rel = rel.replace(os.sep, "/").rstrip("/")
+    if tracked_set is not None:
+        if rel in tracked_set:
+            return True
+        # 目录在 git ls-files 里没有独立条目 —— 看有没有以它开头的文件
+        return any(t.startswith(rel + "/") for t in tracked_set)
+    return os.path.exists(os.path.join(ROOT, rel))
+
+
 def check_path_refs():
+    tracked_set = tracked()
+    if tracked_set is None:
+        print("        （不在 git 仓库里，退化为文件系统检查）")
     bad = []
     for p in md_files():
         with io.open(p, encoding="utf-8") as f:
@@ -51,17 +64,20 @@ def check_path_refs():
             if not t:
                 continue
             if t.endswith(FILE_EXT) or os.path.splitext(t)[1]:
-                if not os.path.exists(os.path.join(ROOT, t)):
-                    bad.append("%s → `%s`" % (os.path.relpath(p, ROOT), t))
+                if not _exists(t, tracked_set):
+                    bad.append("%s → `%s`（不在版本控制里）" % (os.path.relpath(p, ROOT), t))
         for href in LINK.findall(text):
             if href.startswith(("http://", "https://", "#", "mailto:")):
                 continue
             href = href.split("#")[0]
             if not href:
                 continue
-            if os.path.exists(os.path.join(base, href)) or os.path.exists(os.path.join(ROOT, href)):
-                continue
-            bad.append("%s → [..](%s)" % (os.path.relpath(p, ROOT), href))
+            cand = os.path.relpath(os.path.normpath(os.path.join(base, href)), ROOT)
+            if not _exists(cand, tracked_set):
+                cand2 = href
+                if not _exists(cand2, tracked_set):
+                    bad.append("%s → [..](%s)（不在版本控制里）" % (os.path.relpath(p, ROOT), href))
+            continue
     assert not bad, "引用了不存在的文件：\n        " + "\n        ".join(sorted(set(bad)))
 
 

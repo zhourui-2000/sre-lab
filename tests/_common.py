@@ -9,6 +9,7 @@
 import io
 import os
 import re
+import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -62,3 +63,20 @@ def iter_alerts(text):
         out.append(cur)
     # 只保留真正带 for: 的（记录规则没有 alert:）
     return [a for a in out if a["for"]]
+
+
+def tracked():
+    """版本控制里的路径集合（相对仓库根）。
+
+    ★ 用 `git ls-files` 而不是文件系统，原因是踩过：
+      控制端有一个未跟踪的 `observability/alertmanager.yml`（含 SMTP 口令的本地残留），
+      于是「文档引用了不存在的路径」这条在 WSL 上绿、在服务器上红 ——
+      同一份仓库、同一条判据、两个结论。判据必须只依赖**已入库**的事实。
+    返回 None 表示不在 git 仓库里（退化为文件系统检查）。
+    """
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", ROOT, "ls-files"], stderr=subprocess.DEVNULL)
+        return set(out.decode("utf-8").splitlines())
+    except Exception:
+        return None

@@ -25,7 +25,7 @@ dial tcp4: lookup alertmanager on 127.0.0.11:53: no such host
 
 ## 修复
 
-`observability/docker-compose.yml` 的 vmalert.command 补 `- '--remoteWrite.url=http://victoriametrics:8428'`；新增 `observability/alertmanager.yml`（route+receiver）与 alertmanager service。commit `ea144de` / `06e025f`。
+`observability/docker-compose.yml` 的 vmalert.command 补 `- '--remoteWrite.url=http://victoriametrics:8428'`；新增 `observability/alertmanager.yml.example`（route+receiver；真配置在服务器 /root/.sre-lab-secrets/，不入库）与 alertmanager service。commit `ea144de` / `06e025f`。
 
 | 视图 | 结果 |
 |---|---|
