@@ -153,7 +153,7 @@
 **仍空着**
 
 - 可观测栈满负载峰值内存（10-09 复测为空载数据，不足以定配额）。
-- 各类故障 **MTTR** 仍未测。容灾侧 RTO/RPO 已闭环，MTTR 是"故障发生后多久修好"，另一个维度。
+- 各类故障 **MTTR** —— 四段口径（`T_break` → `T_detect` → `T_ack` → `T_fix`），**首次实测 n=1**（2026-11-04 受控中断 197 s）：**MTTD 128 s**、**MTTR 69 s**；`T_ack` 仍空（演练时人就在现场）。**均值需 3 次「告警真的 fire 过」的故障**，暂不填。口径、时间线与分层理由见 [`slo.md`](slo.md) 第 11 节。
 - 同一份 db 搬到另一台机器（证书绑 hostname/IP）。
 
 10-19 SLO 阶段补充（第 9 个容器 `blackbox-exporter v0.29.0`，`mem_limit` 48 MB）：实测 current **16–17 MB** / anon **10–11 MB**（占 limit 22%），撞限 0、`oom_kill` 0、swap 1 MB。整机 available **338 MB**、swap **435 MB**、9 容器 current 合计 **328 MB**（anon 247 MB）、根分区 **33%**。与 W4 收口（338 / 550）比 swap 反降 115 MB。加探针没有改变「2G 已到边界」的结论。

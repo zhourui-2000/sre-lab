@@ -68,6 +68,8 @@ QUERIES = [
     ("p1m",     "近 1m 探针样本数",         'count_over_time(probe_success{job="blackbox"}[1m])',   "num0"),
     ("u1m",     "近 1m up 样本数",          'count_over_time(up{job="blackbox"}[1m])',              "num0"),
     ("firing",  "正在 firing 的告警",       'count(ALERTS{alertstate="firing"}) or vector(0)',      "num0"),
+    # 不显示：只用来算「窗口实际跨度」（样本数 × 采集间隔），见下面 ③
+    ("span",    "",                          'count_over_time(probe_success{job="blackbox"}[30d])', "raw"),
 ]
 
 
@@ -149,10 +151,25 @@ def main():
 
     notes = {}
 
-    # ③ 兜底：记录规则还没产出 minutes 时本地换算（并明确标出来，不静默）
-    if data["bmin"] is None and data["budget"] is not None:
-        data["bmin"] = data["budget"] * BUDGET_MINUTES
-        notes["bmin"] = "⚠️ 记录规则尚未产出，此值由脚本本地换算（ratio × 216）"
+    # ③ 预算分钟：按「实际有数据的跨度」比例分配（2026-11-04 修正）
+    #    ratio 用的是「已采集窗口」的错误率，而 216 分钟是「30 天」的预算。
+    #    窗口没填满时两者不同步 —— 直接 ratio × 216 会把剩余时间放大
+    #    （2026-10-22 实测：显示 198.6 分钟，自洽值 ≈20 分钟，差 10 倍）。
+    days = None
+    if data.get("span"):
+        # 跨度 = 样本数 × 采集间隔；用样本数而不是时间戳，是因为
+        # timestamp() 套在范围向量上拿不到「最早那个样本」的时间（2026-11-04 实测踩到）
+        days = float(data["span"]) * SCRAPE_SECONDS / 86400.0
+        days = min(days, 30.0)
+    if data["budget"] is not None:
+        if days is not None and days < 29.5:
+            prorated = BUDGET_MINUTES * days / 30.0
+            data["bmin"] = data["budget"] * prorated
+            notes["bmin"] = ("按已运行 %.1f 天比例分配预算 %.0f 分钟；窗口填满 30 天后自动变 216"
+                             % (days, prorated))
+        elif data["bmin"] is None:
+            data["bmin"] = data["budget"] * BUDGET_MINUTES
+            notes["bmin"] = "⚠️ 记录规则尚未产出，此值由脚本本地换算（ratio × 216）"
 
     if as_json:
         print(json.dumps({"host": host, "ts": int(time.time()),
@@ -186,6 +203,8 @@ def main():
         "firing":  "含主机的 4 条规则；0 才是常态",
     }
     for key, label, _expr, style in QUERIES:
+        if not label:          # span 只参与计算，不显示
+            continue
         v = data[key]
         note = notes.get(key) or hints.get(key, "")
         if v is None and key not in notes:

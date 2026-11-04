@@ -75,7 +75,7 @@ SLI = 30 天内 probe_success 的平均值 = 成功探测次数 / 有效探测�
 
 ## 7. 未证事项
 
-- `SiteDown` 的"红"只做过逻辑证明（必然 404 的 URL 手工打探针，确认 `probe_success` 变 0），**没真的停过站**。
+- `SiteDown` 的"红"已实测两次：2026-10-22 R1 停站 105 s、2026-11-04 受控停站 197 s。`probe_success` 变 0、告警进 pending 都成立；但 105 s 那次 `for: 3m` 追不上，**零 firing**，见第 11 节。
 - 99.5% 无历史数据支撑。
 - 前 30 天的 SLI 是"到目前为止"，不是完整窗口。
 
@@ -92,7 +92,7 @@ python3 scripts/slo-report.py
 | 探针 up / 近 15m 样本数 | 1 / 60 |
 | 退出码 | 0 |
 
-`slo-canonical` 组 16 条规则（9 记录 + 7 告警）。
+`slo-canonical` 组 17 条规则（9 记录 + 8 告警）。
 
 ## 9. 启动期现象（2026-10-19 首次落地）
 
@@ -122,3 +122,32 @@ python3 scripts/slo-report.py
 停摆第 9 分钟实测：SLI 1 / 预算 1 / 烧钱率 0、`SiteDown` 0 条、`SloNoData` 0 条（需连续 15 分钟无样本）、`ProbePipelineDown` 4 条 firing。整套 SLO 面板全绿。
 
 状态机的坑：`pending` 与 `firing` 是两条独立序列（`alertstate` 是标签），vmalert 停写后 VM 仍保留到 lookback 结束（≈5 分钟）。判断"已恢复"不能看查询结果为空，要数 `count(ALERTS{alertname=…,alertstate="firing"}) or vector(0)` 是否回 0。
+
+## 11. MTTR：四段口径与首次实测（2026-11-04）
+
+**四段**：`T_break` 故障开始 → **`T_detect` 有人知道（告警 fire）** → `T_ack` 开始处置 → `T_fix` 恢复。
+`MTTD = T_detect − T_break`，`MTTR = T_fix − T_detect`。
+
+演练本身填不了 `T_detect` —— 你就在现场，检测时间恒为 0，测出来的是 RTO。能填它的只有**告警自己**。
+所以先补了一条 `SiteDownFast`（`for: 1m`、`severity: warning`），与 `SiteDown`（`for: 3m`、critical）**同表达式分层**；
+`group_by: ['alertname']` 让它们分成两封邮件，互不淹没。
+
+首次受控中断实测（停 web 197 s）：
+
+| 时刻 | 事件 | 距 `T_break` |
+|---|---|---|
+| 21:05:52 | `docker compose down`（`T_break`） | — |
+| 21:06:15 | 探针首个 `probe_success = 0` | +23 s |
+| 21:07:00 | 两条告警**同时**进 pending | +68 s |
+| **21:08:00** | **`SiteDownFast` firing（`T_detect`）** | **+128 s** |
+| 21:09:09 | `/healthz` 200（`T_fix`） | +197 s |
+
+- **MTTD = 128 s**（设计最坏 135 s，吻合）；**MTTR = 69 s**（firing → 恢复）。
+- `SiteDown` 全程只有 pending、**零 firing** —— 197 s 仍不够 `for: 3m` + 评估周期，分层达到设计目的。
+- 成本：13 个失败样本 = 195 s，约占按比例预算（116 分钟）的 **2.8%**。
+
+**n = 1，且 `T_ack` 仍是空的**（人就在现场，没有"开始处置"这个动作）。这是「一次演练样本」，不是「稳定 MTTR」；
+累计 3 次「告警真的 fire 过」的故障后再谈均值。
+
+同日修了一个口径 bug：`slo-report.py` 的「还能坏多久」原先拿 ratio（分母是**已采集窗口**）直接乘 216（**30 天**），
+窗口没填满时会高估。现按 `216 × 已运行天数 / 30` 折算并在行尾注明。实测 2026-11-04：旧 **203.9** 分钟 → 新 **109.4** 分钟。
