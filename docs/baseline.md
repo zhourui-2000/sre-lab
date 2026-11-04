@@ -2,6 +2,21 @@
 
 记录当前**已知良好状态**与**不可违反的前提**。只随实测变化而更新，不记过程。故障见 [`incidents/`](incidents/)，规则见 [`methodology.md`](methodology.md)，决策见 [`adr/`](adr/)。
 
+## 状态真源
+
+**状态类数字只在这里维护。** 其余文档可以复述，但只要与本表不一致，一律以本表为准
+（评审原则 P2）。每改一次数，把旧值加进 `tests/test_state_single_source.py` 的黑名单 ——
+这样「我记得改过」才变成「机器保证没漏」。
+
+| 状态量 | 值 | 测量命令 | 最近实测 | 详情 |
+|---|---|---|---|---|
+| RTO · 影子 / 手工 / 完整 / 含排障 | 8 s / 98 s / **134 s** / 835 s | `dr.md` §7.9 的 `T0` → `T_fix` 时间线 | 2026-10-22 | [dr.md](dr.md) |
+| 灾备恢复 L1–L4 | L1–L4 全部已验；R3 全程 **339 s** | `scripts/check-recoverability.py` + `dr.md` §7.10 | 2026-10-22 | [dr.md](dr.md) |
+| RPO | B 层 **3.1 MB** 加密归档；**≤24h**（定时器未上线前不成立） | `ls -lt /root/backup/*.enc` | 2026-11-04 | [dr.md](dr.md) |
+| MTTD / MTTR | **128 s / 69 s**（n=1） | `ALERTS{alertname=~"SiteDown.*"}` 的首个 firing 样本；见 [slo.md](slo.md) §11 | 2026-11-04 | [slo.md](slo.md) |
+| 错误预算余额 | **94.4%**（≈109.4 分钟，按已运行 16.1 天折算） | `scripts/slo-report.py` | 2026-11-04 | [slo.md](slo.md) |
+| 可用内存 | **284 MB** / 1870 MB（稳态 245–346） | `scripts/check-mem-budget.py` | 2026-11-04 | [capacity.md](capacity.md) |
+
 ## 一、系统资源
 
 测量于 2026-09-12（加固完成、可观测栈部署前）。
@@ -146,7 +161,7 @@
 **已完成**
 
 - 手工部署一次耗时 **已完成**（2026-10-21 影子重建）：L1 站点净值 **8 s**（克隆 4 + 起服验证 4）、L2 指标净值 **9 s**，合计 **17 s**。表面值 45 s 含 28 s `sleep`，不扣会虚报 2.6 倍。口径见 [`dr.md`](dr.md)。
-- blackbox-exporter **已完成**（2026-10-19 落地），`v0.29.0` 作为 compose 服务（不进 k3s，见 [ADR 0005](adr/0005-blackbox-on-docker-compose.md)），与消费它的 7 条规则同批提交。探针 15s；SLI 目标 `/healthz` 严格 200；SLO 99.5% / 30 天、预算 216 分钟。
+- blackbox-exporter **已完成**（2026-10-19 落地），`v0.29.0` 作为 compose 服务（不进 k3s，见 [ADR 0005](adr/0005-blackbox-on-docker-compose.md)），与消费它的 8 条规则同批提交。探针 15s；SLI 目标 `/healthz` 严格 200；SLO 99.5% / 30 天、预算 216 分钟。
 - GitOps 部署耗时 **已完成**：ArgoCD 首装到 4 Pod 就绪约 34 分钟（其中 12 分钟是镜像拉取超时白等），首次同步 12 秒。
 - RTO / RPO **已完成**（2026-10-22）。**RTO** 17 s；**RPO** 按可再生性分三层：B 层状态（`state.db` + `tls/token/cred/etc` + `letsencrypt` + `alertmanager` 密钥）**3.1 MB 加密外发**，RPO = 上次备份到现在；A 层 **1.8 G**（containerd 镜像层 + k3s 二进制）可再生产、不备；C 层 **89 M** 压不动（`vmdata` gzip 比率 **0.98**）、明确认输。恢复演练验到 **L4**：空状态起 k3s，用备份覆盖后 `namespace 6 / pods 8 / deployments 7 / secrets 9` 全部回来，且 **`creationTimestamp` 保留原值**（是同一批对象，不是重建的等价对象）。R3 全程 **339 s**，站点不受影响。
 

@@ -15,6 +15,10 @@
 | RTO | 影子 8 s / 完整 134 s（手工 98 s + 内容 36 s）/ 含排障 14 min；L4 从零拉起 339 s（含重拉 313 MB 镜像） |
 | MTTR | 首次实测 n=1：MTTD **128 s** / MTTR **69 s**（2026-11-04 受控中断 197 s）；均值待 3 次样本 |
 
+> **状态类数字（RTO / MTTD / MTTR / RPO / 预算余额）的唯一真源是
+> [`baseline.md` 的状态真源表](docs/baseline.md)。** 本表只做首页复述；
+> 两处不一致时以真源为准，且 `tests/test_state_single_source.py` 会把过期值拦下来。
+
 ## 架构
 
 ```text

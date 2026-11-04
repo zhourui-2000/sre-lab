@@ -4,6 +4,9 @@
 - 规则 `observability/slo-rules.yml`　探针 `observability/blackbox.yml`　判据 `scripts/slo-report.py`
 - 相关 [ADR 0005](adr/0005-blackbox-on-docker-compose.md) · [ADR 0003](adr/0003-blackbox-exporter-deferred.md) · [事故 2026-10-19](incidents/2026-10-19-healthz-missing-on-canonical-https.md)
 
+> 本文的数字是**口径定义与实测记录**，不是「当前状态」。
+> 当前状态（预算余额 / MTTD / MTTR）以 [`baseline.md` 的状态真源表](baseline.md) 为准。
+
 ## 1. SLI
 
 ```
@@ -47,6 +50,22 @@ SLI = 30 天内 probe_success 的平均值 = 成功探测次数 / 有效探测�
 两个窗口必须同时成立：长窗口判严重程度，短窗口判是否还在烧。只用长窗口，修好了告警还挂着；只用短窗口，一次抖动就响。
 
 `SiteDown` 只覆盖"探针明确看到失败"，短暂抖动、间歇失败、慢速劣化只有烧钱率看得见。
+
+
+### 告警与 `for:`（唯一清单）
+
+改规则必须同步改这张表 —— `tests/test_slo_consistency.py` 会逐条比对两侧。
+
+| 告警 | `for` | severity | 一句话 |
+|---|---|---|---|
+| `SiteDownFast` | 1m | warning | 1–3 分钟的中断也要有人知道（早于 SiteDown） |
+| `SiteDown` | 3m | critical | 持续不可用，叫醒人 |
+| `ProbePipelineDown` | 3m | warning | 测量链路断了 —— 不是站点坏了 |
+| `SloNoData` | 1m | warning | 15 分钟无样本，此时 SLI 不可信 |
+| `SloFastBurn` | 2m | critical | 1 小时烧掉 2% 预算 |
+| `SloMediumBurn` | 5m | warning | 6 小时烧掉 5% 预算 |
+| `SloSlowBurn` | 30m | info | 3 天烧掉 10% 预算 |
+| `CertExpiringSoon` | 1h | warning | 证书 21 天内过期（独立维度，不进 SLI） |
 
 ## 4. 探针挂了 ≠ 站点挂了
 

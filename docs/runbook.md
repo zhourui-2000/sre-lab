@@ -64,7 +64,7 @@ cd /opt/sre-lab/observability && docker compose up -d --force-recreate alertmana
 docker logs alertmanager --tail 10 | grep -iE "permission|error|Listening"
 ```
 
-判据必须在容器视角下取。宿主上 `sudo -u nobody cat /root/.sre-lab-secrets/...` 会被 `/root` 的 750 挡住，输出 `Permission denied`，那是假阴性。文件权限保持 `644` 不要改 600：容器以 `nobody` 运行，600 会 crash loop。保护来自目录权限（[ADR 0002](../adr/0002-secret-file-permissions.md)）。
+判据必须在容器视角下取。宿主上 `sudo -u nobody cat /root/.sre-lab-secrets/...` 会被 `/root` 的 750 挡住，输出 `Permission denied`，那是假阴性。文件权限保持 `644` 不要改 600：容器以 `nobody` 运行，600 会 crash loop。保护来自目录权限（[ADR 0002](adr/0002-secret-file-permissions.md)）。
 
 ## 回滚 / 还原的固定动作
 
